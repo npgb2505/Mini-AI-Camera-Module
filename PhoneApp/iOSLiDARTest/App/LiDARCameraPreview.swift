@@ -22,14 +22,14 @@ struct LiDARCameraPreview: UIViewRepresentable {
 
         guard ARWorldTrackingConfiguration.isSupported,
               ARWorldTrackingConfiguration.supportsFrameSemantics([.sceneDepth, .smoothedSceneDepth]) else {
-            model.updateCameraStatus("Thiết bị chưa hỗ trợ LiDAR scene depth của ARKit.")
+            model.updateCameraStatus("Thiết bị hoặc phiên iOS này chưa hỗ trợ ARKit sceneDepth; chưa có số đo khoảng cách.")
             return view
         }
 
         let configuration = ARWorldTrackingConfiguration()
         configuration.frameSemantics = [.sceneDepth, .smoothedSceneDepth]
         view.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
-        model.updateCameraStatus("Camera sau và LiDAR đang chạy.")
+        model.updateCameraStatus("Đang chờ camera và ARKit sceneDepth…")
         return view
     }
 
@@ -48,6 +48,8 @@ struct LiDARCameraPreview: UIViewRepresentable {
         private var detectionEnabled = false
         private var lastDepthUpdate = 0.0
         private var lastFrameUpdate = 0.0
+        private var didReceiveSceneDepth = false
+        private var didReportMissingSceneDepth = false
         private let imageContext = CIContext()
 
         init(model: CameraModel) {
@@ -63,6 +65,20 @@ struct LiDARCameraPreview: UIViewRepresentable {
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
             let now = frame.timestamp
             let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth
+
+            if depthData != nil, !didReceiveSceneDepth {
+                didReceiveSceneDepth = true
+                let model = self.model
+                Task { @MainActor [weak model] in
+                    model?.updateCameraStatus("ARKit đã cung cấp sceneDepth; khoảng cách hiển thị là ước tính cần kiểm tra thực tế.")
+                }
+            } else if depthData == nil, !didReceiveSceneDepth, !didReportMissingSceneDepth {
+                didReportMissingSceneDepth = true
+                let model = self.model
+                Task { @MainActor [weak model] in
+                    model?.updateCameraStatus("Camera đã có frame nhưng ARKit chưa trả sceneDepth; chưa hiển thị khoảng cách.")
+                }
+            }
 
             if now - lastDepthUpdate >= 0.25 {
                 lastDepthUpdate = now

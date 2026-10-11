@@ -74,7 +74,9 @@ instead of being sent to Vision.
 
 Choose **Chỉ dùng iPhone** to use the rear camera and native ARKit scene depth
 without an ESP32. The intended LiDAR target is iPhone 12 Pro and later LiDAR
-models. Unsupported devices display an ARKit capability message.
+models. Unsupported devices display an ARKit capability message. The app stays
+in a waiting state until ARKit supplies a frame with `sceneDepth`; it does not
+label depth as available merely because an AR session was started.
 
 With YOLO enabled, the app sends a portrait JPEG to `POST /api/detect` and maps
 the backend's normalized `[x1, y1, x2, y2]` box center back to the landscape
@@ -90,14 +92,24 @@ backend's YOLO summary when no Vision provider is configured.
 For voice input, the user can tap the iPhone keyboard's Dictation microphone.
 The native app itself does not record audio or request microphone permission:
 iOS turns speech into text, and the app sends the resulting question text to
-the Flask backend. iOS Dictation behavior follows the user's iPhone settings.
+the Flask backend. The input control in both modes uses this same iPhone
+Dictation path; no ESP32 microphone is used. iOS Dictation behavior follows
+the user's iPhone settings.
 
-After an answer appears in either mode, tap **Đọc câu trả lời** to have the
-iPhone read it with `AVSpeechSynthesizer`, or tap **Dừng đọc** to stop. Speech
-uses the iPhone playback audio session and speaker route; it does not use or
-verify the ESP32 MAX98357A amplifier. This is output only: the app does not
-request microphone access for speech, and question input remains the iOS
-keyboard's Dictation.
+After an answer appears, tap **Đọc câu trả lời** to have the iPhone read it
+with `AVSpeechSynthesizer`. In ESP32 mode, **Nói qua loa ESP32** is a separate
+option: iOS exports Vietnamese TTS buffers, converts them to PCM16LE 16 kHz
+mono, and sends up to 8 seconds/256,000 bytes through the authenticated Flask
+backend. Flask relays only to a direct Wi-Fi firmware connection; the USB
+bridge and PWA do not send speaker audio. The app requires direct firmware mode,
+a status younger than one second, `audio_ok=true`, and `operation_enabled=true`,
+and does not retry after a partial/uncertain result. Firmware keeps this
+endpoint closed until its external GPIO map, MAX98357A, speaker, supply and
+I²S initialization are verified. Even
+an `audio_ok=true` report means firmware initialization only; it does not prove
+that sound is audible. A completed firmware response confirms its PCM byte
+count, not acoustic output. This is output only: the app does not request
+microphone access, and question input remains iOS keyboard Dictation.
 
 ## Backend connection
 

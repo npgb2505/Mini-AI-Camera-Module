@@ -60,6 +60,12 @@ Chế độ **Chỉ dùng iPhone** gửi ảnh và câu hỏi tới `/api/analyz
 mới từ thiết bị. Ở cả hai chế độ, kết quả có thể phát qua loa iPhone bằng nút
 **Đọc câu trả lời**.
 
+Trong chế độ ESP32, tùy chọn **Nói qua loa ESP32** chỉ dùng được khi kết nối
+firmware Wi-Fi trực tiếp trả status mới, `audio_ok=true` và
+`operation_enabled=true`. GPIO, mạch khuếch đại, loa và nguồn của board hiện
+chưa được xác minh nên firmware giữ đầu ra bị khóa. App không dùng microphone
+ESP32 và status firmware không xác nhận có âm thanh nghe được.
+
 ## Mic và giới hạn bản thử
 
 - Muốn hỏi bằng giọng nói, chạm vào ô câu hỏi rồi dùng mic **Dictation** trên

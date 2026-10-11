@@ -31,6 +31,7 @@ struct DeviceStatusPayload: Decodable {
     let tofBootId: String?
     let tofMode: String?
     let tofOk: Bool?
+    let audioOk: Bool?
     let operationEnabled: Bool?
     let deviceHealth: DeviceHealthPayload?
     let buttonEvent: DeviceButtonEventPayload?
@@ -51,6 +52,7 @@ struct DeviceStatusPayload: Decodable {
         case tofBootId = "tof_boot_id"
         case tofMode = "tof_mode"
         case tofOk = "tof_ok"
+        case audioOk = "audio_ok"
         case operationEnabled = "operation_enabled"
         case deviceHealth = "device_health"
         case buttonEvent = "button_event"
@@ -216,5 +218,23 @@ struct DeviceAskPayload: Decodable {
         case answer, error
         case frameSeq = "frame_seq"
         case visionUsed = "vision_used"
+    }
+}
+
+struct DeviceSpeakerResult: Decodable {
+    let schemaVersion: String?
+    let requestId: String?
+    let state: String?
+    let bytesPlayed: Int?
+    let durationMs: Double?
+    let errorCode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case state
+        case schemaVersion = "schema_version"
+        case requestId = "request_id"
+        case bytesPlayed = "bytes_played"
+        case durationMs = "duration_ms"
+        case errorCode = "error_code"
     }
 }

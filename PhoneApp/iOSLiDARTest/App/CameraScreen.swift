@@ -96,7 +96,7 @@ struct CameraScreen: View {
 
                 modeCard(
                     title: "Chỉ dùng iPhone",
-                    subtitle: "Dùng camera sau và ARKit LiDAR trên iPhone 12 Pro trở lên; không cần ESP32.",
+                    subtitle: "Camera sau và ARKit sceneDepth trên iPhone 12 Pro khi thiết bị hỗ trợ; không cần ESP32.",
                     symbol: "iphone.gen3",
                     tint: .mint
                 ) {
@@ -214,7 +214,7 @@ struct CameraScreen: View {
                 Circle()
                     .fill(model.centerDistance == nil ? .orange : .mint)
                     .frame(width: 7, height: 7)
-                Text("LiDAR")
+                Text(model.centerDistance == nil ? "LiDAR · chờ dữ liệu" : "LiDAR · có dữ liệu")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
             }
             .padding(.horizontal, 11)
@@ -299,10 +299,14 @@ struct CameraScreen: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.detectionEnabled ? "YOLO ĐANG CHẠY" : "YOLO ĐANG TẠM DỪNG")
+                    Text(model.phoneDetectionsFresh
+                         ? "YOLO CÓ KẾT QUẢ MỚI"
+                         : model.isDetecting
+                           ? "ĐANG CHỜ YOLO"
+                           : model.detectionEnabled ? "YOLO ĐANG BẬT" : "YOLO TẠM DỪNG")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .tracking(1)
-                        .foregroundStyle(model.detectionEnabled ? .mint : .white.opacity(0.65))
+                        .foregroundStyle(model.phoneDetectionsFresh ? .mint : model.detectionEnabled ? .orange : .white.opacity(0.65))
                     Text(model.status)
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.78))
@@ -324,7 +328,7 @@ struct CameraScreen: View {
                         .frame(width: 42, height: 42)
                         .background(.mint, in: Circle())
                 }
-                .accessibilityLabel(model.detectionEnabled ? "Tạm dừng YOLO" : "Bật YOLO")
+                .accessibilityLabel(model.detectionEnabled ? "Tạm dừng gửi khung tới YOLO" : "Bật gửi khung tới YOLO")
             }
 
             if model.phoneDetectionsFresh, !model.detections.isEmpty {
@@ -387,6 +391,9 @@ struct CameraScreen: View {
                 .disabled(model.isAsking || !model.phoneFrameFresh || phoneQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityLabel("Hỏi Vision LLM về ảnh iPhone")
             }
+            Text("Dùng Dictation trên bàn phím iPhone; app gửi phần chữ và không ghi âm micro.")
+                .font(.system(size: 10, weight: .regular, design: .rounded))
+                .foregroundStyle(.white.opacity(0.55))
             Text(model.phoneFrameFresh ? "Khung camera mới sẵn sàng để hỏi." : "Đang chờ khung camera mới; thao tác hỏi đang khóa.")
                 .font(.system(size: 10, weight: .regular, design: .rounded))
                 .foregroundStyle(model.phoneFrameFresh ? .mint.opacity(0.8) : .orange.opacity(0.85))
@@ -404,7 +411,7 @@ struct CameraScreen: View {
                 .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
             }
 
-            Text("Ảnh do camera iPhone chụp; ARKit LiDAR ghép khoảng cách tại tâm bbox YOLO. Số đo cần kiểm tra thực tế.")
+            Text("Ảnh từ camera iPhone; ARKit sceneDepth được dùng khi có dữ liệu. Khoảng cách là ước tính và cần kiểm tra thực tế.")
                 .font(.system(size: 10, weight: .regular, design: .rounded))
                 .foregroundStyle(.white.opacity(0.48))
                 .fixedSize(horizontal: false, vertical: true)
@@ -609,6 +616,9 @@ struct CameraScreen: View {
                             .disabled(!model.deviceCanAsk || deviceQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .accessibilityLabel("Hỏi Vision về ảnh ESP32")
                         }
+                        Text("Dùng Dictation trên bàn phím iPhone; app gửi phần chữ và không ghi âm micro.")
+                            .font(.system(size: 10, weight: .regular, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.52))
                         if model.deviceVisionReady == false {
                             Text("Vision chưa sẵn sàng trên máy chủ.")
                                 .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -635,6 +645,31 @@ struct CameraScreen: View {
                                     .foregroundStyle(.white)
                                     .fixedSize(horizontal: false, vertical: true)
                                 answerSpeechControl(for: model.deviceAnswer)
+                                Button {
+                                    Task {
+                                        await model.sendAnswerToDeviceSpeaker(model.deviceAnswer)
+                                    }
+                                } label: {
+                                    Label(
+                                        model.isSendingDeviceSpeech ? "Đang gửi tới loa…" : "Nói qua loa ESP32",
+                                        systemImage: "antenna.radiowaves.left.and.right"
+                                    )
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 9)
+                                    .background(.white.opacity(0.12), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(!model.deviceSpeakerReady || model.isSendingDeviceSpeech)
+                                .accessibilityHint("Tạo PCM trên iPhone rồi chuyển qua Flask tới firmware ESP32; chỉ phát khi loa và trạng thái MODE đã được xác minh.")
+                                Text("Tạo tối đa 8 giây giọng đọc từ câu trả lời, gửi qua Flask; không dùng micro ESP32.")
+                                    .font(.system(size: 9, weight: .regular, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.5))
+                                Text(model.deviceSpeakerMessage ?? model.deviceSpeakerUnavailableMessage)
+                                    .font(.system(size: 10, weight: .regular, design: .rounded))
+                                    .foregroundStyle(model.deviceSpeakerReady ? .mint : .orange)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)

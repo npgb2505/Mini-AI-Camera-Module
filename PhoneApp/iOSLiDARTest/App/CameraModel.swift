@@ -68,6 +68,8 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     @Published private(set) var deviceAnswerFrameSequence: Int?
     @Published private(set) var deviceAskError: String?
     @Published private(set) var isDeviceAsking = false
+    @Published private(set) var isSendingDeviceSpeech = false
+    @Published private(set) var deviceSpeakerMessage: String?
     @Published private(set) var isRefreshingDevice = false
     @Published private(set) var deviceFreshnessRevision = 0
     @Published private(set) var deviceButtonMessage: String?
@@ -85,6 +87,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     private static let handledDeviceButtonEventsDefaultsKey = "roSight.handledDeviceButtonEvents.v1"
     private static let maximumHandledDeviceButtonEvents = 512
     private static let deviceFrameFreshnessMs = 350.0
+    private static let deviceSpeakerStatusFreshnessMs = 1_000.0
     private static let maximumDeviceFrameBytes = 2 * 1024 * 1024
     private static let phoneFrameFreshnessSeconds = 2.5
     private static let phoneDetectionFreshnessSeconds = 2.5
@@ -146,6 +149,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             deviceConnection = nil
             deviceError = nil
             deviceAskError = nil
+            deviceSpeakerMessage = nil
             deviceAnswer = ""
             deviceAnswerFrameSequence = nil
             deviceAnswerButtonPressId = nil
@@ -300,7 +304,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         detections = []
         phoneDetectionsCapturedAt = nil
         phoneDetectionsFresh = false
-        status = enabled ? "Đang chờ kết quả YOLO mới…" : "YOLO đã tạm dừng; camera và LiDAR vẫn đang chạy."
+        status = enabled ? "Đang chờ kết quả YOLO mới…" : "Đã tạm dừng gửi khung hình tới YOLO."
     }
 
     func clearDevicePreview() {
@@ -347,6 +351,34 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
 
     var deviceOperationEnabled: Bool? {
         deviceStatusSnapshot?.resolvedOperationEnabled
+    }
+
+    var deviceSpeakerReady: Bool {
+        deviceConnection?.transport == "firmware_wifi"
+            && deviceConnection?.deviceConnected == true
+            && deviceStatusSnapshot?.audioOk == true
+            && deviceOperationEnabled == true
+            && deviceStatusElapsedMs.map { $0 <= Self.deviceSpeakerStatusFreshnessMs } == true
+    }
+
+    var deviceSpeakerUnavailableMessage: String {
+        guard deviceConnection?.transport == "firmware_wifi" else {
+            return "Loa ESP32 cần kết nối Wi-Fi firmware; USB bridge chưa chuyển tiếp audio."
+        }
+        guard deviceConnection?.deviceConnected == true else {
+            return "Chưa kết nối được ESP32 qua firmware Wi-Fi."
+        }
+        guard let statusAge = deviceStatusElapsedMs,
+              statusAge <= Self.deviceSpeakerStatusFreshnessMs else {
+            return "Đang chờ trạng thái loa mới từ firmware ESP32."
+        }
+        if deviceOperationEnabled != true {
+            return "ESP32 đang chờ nút MODE; chưa thể phát audio."
+        }
+        if deviceStatusSnapshot?.audioOk != true {
+            return "Loa, mạch khuếch đại, nguồn và GPIO chưa được firmware xác minh; câu trả lời vẫn phát được trên iPhone."
+        }
+        return "Firmware báo ngõ loa đã khởi tạo; chưa xác nhận âm thanh nghe được."
     }
 
     var deviceAnswerButtonSourceLabel: String {
@@ -729,6 +761,64 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             sessionGeneration: authenticationGeneration,
             buttonAction: nil
         )
+    }
+
+    func sendAnswerToDeviceSpeaker(_ text: String) async {
+        let cleanedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanedText.isEmpty else { return }
+        guard !isSendingDeviceSpeech else { return }
+        guard deviceSpeakerReady else {
+            deviceSpeakerMessage = deviceSpeakerUnavailableMessage
+            return
+        }
+
+        let generation = authenticationGeneration
+        let requestId = UUID().uuidString.lowercased()
+        stopSpeakingAnswer()
+        isSendingDeviceSpeech = true
+        deviceSpeakerMessage = "Đang tạo giọng đọc tiếng Việt trên iPhone…"
+        defer { isSendingDeviceSpeech = false }
+
+        do {
+            let pcm = try await SpeechPCMExporter.makePCM16LE(text: cleanedText)
+            guard generation == authenticationGeneration else { return }
+            guard deviceSpeakerReady else {
+                throw APIError.message(deviceSpeakerUnavailableMessage)
+            }
+            guard !pcm.isEmpty, pcm.count.isMultiple(of: 2),
+                  pcm.count <= SpeechPCMExporter.maximumBytes else {
+                throw APIError.message("Audio tạo ra không đúng PCM16LE hoặc vượt giới hạn 8 giây.")
+            }
+
+            var request = try makeRequest(
+                endpoint: "device/speaker",
+                method: "POST",
+                timeoutInterval: 22
+            )
+            request.setValue("application/vnd.ro-assistive.pcm16le",
+                             forHTTPHeaderField: "Content-Type")
+            request.setValue("16000", forHTTPHeaderField: "X-Audio-Sample-Rate")
+            request.setValue("1", forHTTPHeaderField: "X-Audio-Channels")
+            request.setValue(requestId, forHTTPHeaderField: "X-Audio-Request-Id")
+            request.httpBody = pcm
+
+            deviceSpeakerMessage = "Đang truyền audio tới ESP32…"
+            let (data, response) = try await performAuthenticatedRequest(request)
+            guard generation == authenticationGeneration else { return }
+            let result = try Self.decode(DeviceSpeakerResult.self,
+                                         data: data,
+                                         response: response)
+            guard result.schemaVersion == "2.0",
+                  result.requestId == requestId,
+                  result.state == "completed",
+                  result.bytesPlayed == pcm.count else {
+                throw APIError.message("Firmware chưa xác nhận phát đầy đủ câu trả lời; app sẽ không tự gửi lại.")
+            }
+            deviceSpeakerMessage = "Firmware đã gửi đủ PCM tới I²S; chưa xác nhận âm thanh nghe được."
+        } catch {
+            guard generation == authenticationGeneration else { return }
+            deviceSpeakerMessage = error.localizedDescription
+        }
     }
 
     private func submitDeviceQuestion(
