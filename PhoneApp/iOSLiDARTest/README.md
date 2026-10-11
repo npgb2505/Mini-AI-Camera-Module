@@ -77,9 +77,11 @@ untrusted network.
 The repository workflow at `.github/workflows/ios-lidar-test.yml` is a manual
 `workflow_dispatch` job on macOS. It generates the Xcode project with XcodeGen,
 builds an unsigned iOS app, and packages an IPA artifact. It does not sign the
-app. To run it, the workflow must be available in the remote repository and
-the account must have permission to start Actions. The current local branch
-has not been pushed, and no hosted build was started for this work.
+app. This source is on local branch `codex/ios-lidar-test-2026-10-11` in the
+configured repository `bartsil/Mini-AI-Camera-Module`, with local commits
+`59a064c` and `295771c`. A push was attempted and GitHub returned HTTP 403
+because account `npgb2505` has READ-only access. The branch has not been pushed,
+and no hosted build or workflow run was started for this work.
 
 An unsigned IPA must be signed for installation. AltServer/AltStore can
 sideload it with a free Apple Account; follow the current AltStore instructions
