@@ -69,8 +69,10 @@ frame is at most 2.5 seconds old; it sends that iPhone JPEG and the question as
 multipart form data to `POST /api/analyze`. Vision can fall back to the
 backend's YOLO summary when no Vision provider is configured.
 
-The question fields use the iPhone keyboard's built-in dictation. The app does
-not add a microphone feature.
+For voice input, the user can tap the iPhone keyboard's Dictation microphone.
+The native app itself does not record audio or request microphone permission:
+iOS turns speech into text, and the app sends the resulting question text to
+the Flask backend. iOS Dictation behavior follows the user's iPhone settings.
 
 After an answer appears in either mode, tap **Đọc câu trả lời** to have the
 iPhone read it with `AVSpeechSynthesizer`, or tap **Dừng đọc** to stop. Speech
@@ -105,7 +107,8 @@ playback, have not been compiled.
 
 An unsigned IPA must be signed for installation. AltServer/AltStore can
 sideload it with a free Apple Account; follow the current AltStore instructions
-for setup and refresh timing.
+for setup and refresh timing. See the step-by-step [Vietnamese free install and
+sideload guide](INSTALL_VI.md).
 
 ## Verification limits
 
