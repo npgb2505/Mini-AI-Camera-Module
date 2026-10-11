@@ -20,16 +20,22 @@ struct LiDARCameraPreview: UIViewRepresentable {
         view.session.delegate = context.coordinator
         view.session.delegateQueue = DispatchQueue(label: "vn.khiemthi.rosight.arsession")
 
-        guard ARWorldTrackingConfiguration.isSupported,
-              ARWorldTrackingConfiguration.supportsFrameSemantics([.sceneDepth, .smoothedSceneDepth]) else {
-            model.updateCameraStatus("Thiết bị hoặc phiên iOS này chưa hỗ trợ ARKit sceneDepth; chưa có số đo khoảng cách.")
+        guard ARWorldTrackingConfiguration.isSupported else {
+            model.updateCameraStatus("ARKit camera không được hỗ trợ trên thiết bị này; chưa có ảnh hoặc khoảng cách.")
             return view
         }
 
         let configuration = ARWorldTrackingConfiguration()
-        configuration.frameSemantics = [.sceneDepth, .smoothedSceneDepth]
+        let sceneDepthSupported = ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
+        if sceneDepthSupported {
+            configuration.frameSemantics = ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth)
+                ? [.sceneDepth, .smoothedSceneDepth]
+                : [.sceneDepth]
+        }
         view.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
-        model.updateCameraStatus("Đang chờ camera và ARKit sceneDepth…")
+        model.updateCameraStatus(sceneDepthSupported
+            ? "Đang chờ camera và ARKit sceneDepth…"
+            : "Camera iPhone đã chạy; thiết bị không hỗ trợ sceneDepth nên chưa có khoảng cách.")
         return view
     }
 
@@ -92,15 +98,13 @@ struct LiDARCameraPreview: UIViewRepresentable {
             }
 
             guard now - lastFrameUpdate >= 0.9,
-                  let depthData,
-                  let snapshot = DepthSnapshot.copy(
-                    depthMap: depthData.depthMap,
-                    confidenceMap: depthData.confidenceMap
-                  ),
                   let jpeg = jpegFrame(frame.capturedImage) else {
                 return
             }
             lastFrameUpdate = now
+            let snapshot = depthData.flatMap {
+                DepthSnapshot.copy(depthMap: $0.depthMap, confidenceMap: $0.confidenceMap)
+            }
 
             stateLock.lock()
             let shouldRunYOLO = detectionEnabled

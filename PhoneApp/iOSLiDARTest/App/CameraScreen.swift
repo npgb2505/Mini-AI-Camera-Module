@@ -19,6 +19,7 @@ struct CameraScreen: View {
     @State private var showSettings = false
     @State private var phoneAskTask: Task<Void, Never>?
     @State private var deviceAskTask: Task<Void, Never>?
+    @State private var deviceSpeechTask: Task<Void, Never>?
 
     var body: some View {
         Group {
@@ -38,6 +39,9 @@ struct CameraScreen: View {
                 accessUsername: $accessUsername,
                 accessPassword: $accessPassword
             ) {
+                deviceSpeechTask?.cancel()
+                deviceSpeechTask = nil
+                model.cancelDeviceSpeech()
                 model.configure(
                     baseURL: backendURL,
                     accountUsername: accountUsername,
@@ -646,7 +650,7 @@ struct CameraScreen: View {
                                     .fixedSize(horizontal: false, vertical: true)
                                 answerSpeechControl(for: model.deviceAnswer)
                                 Button {
-                                    Task {
+                                    deviceSpeechTask = Task {
                                         await model.sendAnswerToDeviceSpeaker(model.deviceAnswer)
                                     }
                                 } label: {
@@ -663,7 +667,7 @@ struct CameraScreen: View {
                                 .buttonStyle(.plain)
                                 .disabled(!model.deviceSpeakerReady || model.isSendingDeviceSpeech)
                                 .accessibilityHint("Tạo PCM trên iPhone rồi chuyển qua Flask tới firmware ESP32; chỉ phát khi loa và trạng thái MODE đã được xác minh.")
-                                Text("Tạo tối đa 8 giây giọng đọc từ câu trả lời, gửi qua Flask; không dùng micro ESP32.")
+                                Text("Tối đa 8 giây, gửi qua Flask; rời mode sẽ hủy tác vụ còn tại app. Firmware có thể phát hết PCM đã nhận; không dùng micro ESP32.")
                                     .font(.system(size: 9, weight: .regular, design: .rounded))
                                     .foregroundStyle(.white.opacity(0.5))
                                 Text(model.deviceSpeakerMessage ?? model.deviceSpeakerUnavailableMessage)
@@ -749,7 +753,10 @@ struct CameraScreen: View {
         if selectedMode == .device, mode != .device {
             deviceAskTask?.cancel()
             deviceAskTask = nil
+            deviceSpeechTask?.cancel()
+            deviceSpeechTask = nil
             model.cancelDeviceAsk()
+            model.cancelDeviceSpeech()
             model.clearDevicePreview()
         }
         if selectedMode != .phone, mode == .phone {

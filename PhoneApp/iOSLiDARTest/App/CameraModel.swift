@@ -45,6 +45,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     private var authenticationGeneration = 0
     private var latestJPEG: Data?
     private var latestJPEGAt: Date?
+    private var phoneDepthUpdatedAt: Date?
     private var phoneDetectionsCapturedAt: Date?
     private var lastVisionStatusCheck: Date?
     private var phoneModeActive = false
@@ -52,6 +53,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     private var phoneDetectionGeneration = 0
     private var phoneAskGeneration = 0
     private var deviceAskGeneration = 0
+    private var deviceSpeechGeneration = 0
     private let speechSynthesizer = AVSpeechSynthesizer()
     private var activeSpeechUtteranceID: ObjectIdentifier?
     private var speechSessionActive = false
@@ -91,6 +93,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     private static let maximumDeviceFrameBytes = 2 * 1024 * 1024
     private static let phoneFrameFreshnessSeconds = 2.5
     private static let phoneDetectionFreshnessSeconds = 2.5
+    private static let phoneDepthFreshnessSeconds = 1.0
 
     override init() {
         let savedButtonEvents = Array(
@@ -112,6 +115,17 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     func refreshPhoneFreshness() {
         let frameFresh = phoneHasFreshFrame
         if phoneFrameFresh != frameFresh { phoneFrameFresh = frameFresh }
+
+        if let phoneDepthUpdatedAt {
+            let age = Date().timeIntervalSince(phoneDepthUpdatedAt)
+            if age < 0 || age > Self.phoneDepthFreshnessSeconds {
+                centerDistance = nil
+                self.phoneDepthUpdatedAt = nil
+                if !detectionEnabled {
+                    status = "Đang chờ sceneDepth mới."
+                }
+            }
+        }
 
         let detectionFresh = phoneDetectionsCapturedAt.map { capturedAt in
             let age = Date().timeIntervalSince(capturedAt)
@@ -136,6 +150,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             || accessUsername != self.accessUsername
             || accessPassword != self.accessPassword {
             stopSpeakingAnswer()
+            cancelDeviceSpeech()
             authenticationGeneration += 1
             authenticationTask?.cancel()
             authenticationTask = nil
@@ -182,6 +197,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     func updateCenterDistance(_ value: Double?) {
         guard phoneModeActive else { return }
         centerDistance = value
+        phoneDepthUpdatedAt = value == nil ? nil : Date()
         if value == nil, !detectionEnabled {
             status = "Chưa nhận được dữ liệu LiDAR."
         }
@@ -203,6 +219,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         isAsking = false
         latestJPEG = nil
         latestJPEGAt = nil
+        phoneDepthUpdatedAt = nil
         phoneFrameFresh = false
         phoneDetectionsCapturedAt = nil
         phoneDetectionsFresh = false
@@ -223,6 +240,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         detectionEnabled = false
         latestJPEG = nil
         latestJPEGAt = nil
+        phoneDepthUpdatedAt = nil
         phoneFrameFresh = false
         phoneDetectionsCapturedAt = nil
         phoneDetectionsFresh = false
@@ -343,6 +361,13 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     func cancelDeviceAsk() {
         deviceAskGeneration += 1
         isDeviceAsking = false
+    }
+
+    func cancelDeviceSpeech() {
+        deviceSpeechGeneration += 1
+        guard isSendingDeviceSpeech else { return }
+        isSendingDeviceSpeech = false
+        deviceSpeakerMessage = "Đã hủy tác vụ gửi audio khi rời mode ESP32; firmware có thể phát hết PCM đã nhận."
     }
 
     var deviceStatusSnapshot: DeviceStatusPayload? {
@@ -773,15 +798,22 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         }
 
         let generation = authenticationGeneration
+        let speechGeneration = deviceSpeechGeneration
         let requestId = UUID().uuidString.lowercased()
         stopSpeakingAnswer()
         isSendingDeviceSpeech = true
         deviceSpeakerMessage = "Đang tạo giọng đọc tiếng Việt trên iPhone…"
-        defer { isSendingDeviceSpeech = false }
+        defer {
+            if speechGeneration == deviceSpeechGeneration {
+                isSendingDeviceSpeech = false
+            }
+        }
 
         do {
             let pcm = try await SpeechPCMExporter.makePCM16LE(text: cleanedText)
-            guard generation == authenticationGeneration else { return }
+            guard generation == authenticationGeneration,
+                  speechGeneration == deviceSpeechGeneration,
+                  !Task.isCancelled else { return }
             guard deviceSpeakerReady else {
                 throw APIError.message(deviceSpeakerUnavailableMessage)
             }
@@ -804,7 +836,9 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
 
             deviceSpeakerMessage = "Đang truyền audio tới ESP32…"
             let (data, response) = try await performAuthenticatedRequest(request)
-            guard generation == authenticationGeneration else { return }
+            guard generation == authenticationGeneration,
+                  speechGeneration == deviceSpeechGeneration,
+                  !Task.isCancelled else { return }
             let result = try Self.decode(DeviceSpeakerResult.self,
                                          data: data,
                                          response: response)
@@ -816,7 +850,9 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             }
             deviceSpeakerMessage = "Firmware đã gửi đủ PCM tới I²S; chưa xác nhận âm thanh nghe được."
         } catch {
-            guard generation == authenticationGeneration else { return }
+            guard generation == authenticationGeneration,
+                  speechGeneration == deviceSpeechGeneration,
+                  !Task.isCancelled else { return }
             deviceSpeakerMessage = error.localizedDescription
         }
     }
@@ -894,14 +930,13 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         }
     }
 
-    func receiveFrame(_ jpeg: Data, depth: DepthSnapshot, shouldRunYOLO: Bool) async {
+    func receiveFrame(_ jpeg: Data, depth: DepthSnapshot?, shouldRunYOLO: Bool) async {
         guard phoneModeActive else { return }
         let modeGeneration = phoneModeGeneration
         let capturedAt = Date()
         latestJPEG = jpeg
         latestJPEGAt = capturedAt
         phoneFrameFresh = true
-        centerDistance = depth.centerDistance()
         guard shouldRunYOLO, detectionEnabled, !isDetecting else { return }
         guard !backendBaseURL.isEmpty else {
             status = "Cần nhập địa chỉ Flask trước khi chạy YOLO."
@@ -927,14 +962,17 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
                 FusedDetection(
                     label: item.label,
                     confidence: item.confidence,
-                    distanceMeters: depth.distance(normalizedBox: item.box)
+                    distanceMeters: depth?.distance(normalizedBox: item.box)
                 )
             }
             phoneDetectionsCapturedAt = capturedAt
             let detectionAge = Date().timeIntervalSince(capturedAt)
             phoneDetectionsFresh = detectionAge >= 0 && detectionAge <= Self.phoneDetectionFreshnessSeconds
             let timing = payload.inferenceMs.map { " · \(Int($0)) ms" } ?? ""
-            status = "YOLO: \(detections.count) vật thể\(timing) · khoảng cách ghép từ LiDAR."
+            let depthStatus = depth == nil
+                ? "sceneDepth chưa có ở khung này."
+                : "khoảng cách sceneDepth là ước tính."
+            status = "YOLO: \(detections.count) vật thể\(timing) · \(depthStatus)"
         } catch {
             if phoneModeActive,
                modeGeneration == phoneModeGeneration,

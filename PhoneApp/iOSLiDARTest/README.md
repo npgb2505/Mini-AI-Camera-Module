@@ -75,9 +75,12 @@ instead of being sent to Vision.
 Choose **Chỉ dùng iPhone** to use the rear camera and native ARKit scene depth
 without an ESP32. Scene depth is available only on supported iPhone hardware;
 the app checks ARKit frame-semantics support at runtime rather than assuming it
-from a model name. Unsupported devices display a capability message. The app
-stays in a waiting state until ARKit supplies a frame with `sceneDepth`; it
-does not label depth as available merely because an AR session was started.
+from a model name. If ARKit camera tracking is supported but sceneDepth is not,
+camera frames, YOLO, and image questions remain available while distances stay
+unavailable. The app waits for an actual frame with `sceneDepth` before
+reporting depth; it does not label depth as available merely because an AR
+session was started. The center-distance display also clears a sample after
+one second without a newer depth update.
 
 With YOLO enabled, the app sends a portrait JPEG to `POST /api/detect` and maps
 the backend's normalized `[x1, y1, x2, y2]` box center back to the landscape
@@ -109,7 +112,10 @@ endpoint closed until its external GPIO map, MAX98357A, speaker, supply and
 I²S initialization are verified. Even
 an `audio_ok=true` report means firmware initialization only; it does not prove
 that sound is audible. A completed firmware response confirms its PCM byte
-count, not acoustic output. This is output only: the app does not request
+count, not acoustic output. Leaving ESP32 mode cancels the app's in-progress
+export/transfer when possible. If firmware has already accepted all PCM, the
+app has no remote stop command and playback may finish. This is output only:
+the app does not request
 microphone access, and question input remains iOS keyboard Dictation.
 
 ## Backend connection

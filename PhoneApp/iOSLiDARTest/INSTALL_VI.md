@@ -18,8 +18,9 @@ Actions thành công. Muốn chạy thủ công, workflow cũng phải có trên
   PWA dùng camera iPhone nhưng không đọc được ARKit `sceneDepth`; xem hướng dẫn
   chạy điện thoại trong [README của PWA](../../../04_App/ro-app/README.md).
 - **Native:** có thể dùng ARKit sceneDepth trên iPhone hỗ trợ, bên cạnh chế độ
-  kết nối ESP32. App kiểm tra hỗ trợ ARKit khi chạy; bản native là app thử
-  nghiệm, không phải bản phát hành.
+  kết nối ESP32. Nếu camera ARKit chạy nhưng sceneDepth không được hỗ trợ, app
+  vẫn có thể dùng frame iPhone cho YOLO/hỏi ảnh nhưng không hiện khoảng cách.
+  Bản native là app thử nghiệm, không phải bản phát hành.
 
 ## 1. Lấy IPA từ GitHub Actions
 
