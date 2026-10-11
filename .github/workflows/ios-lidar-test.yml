@@ -1,0 +1,49 @@
+name: Build iOS test IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: PhoneApp/iOSLiDARTest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Build unsigned iPhone app
+        run: |
+          xcodebuild \
+            -project RoSight.xcodeproj \
+            -scheme RoSight \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath .build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=''
+
+      - name: Package IPA for AltServer
+        run: |
+          mkdir -p package/Payload
+          cp -R .build/Build/Products/Release-iphoneos/RoSight.app package/Payload/
+          (cd package && zip -qr ../RoSight-unsigned.ipa Payload)
+
+      - name: Save install package
+        uses: actions/upload-artifact@v4
+        with:
+          name: RoSight-unsigned-ipa
+          path: PhoneApp/iOSLiDARTest/RoSight-unsigned.ipa
+          retention-days: 3

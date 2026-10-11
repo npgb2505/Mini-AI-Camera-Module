@@ -1,0 +1,35 @@
+name: RoSight
+options:
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    PRODUCT_BUNDLE_IDENTIFIER: vn.khiemthi.rosight
+    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.1"
+    TARGETED_DEVICE_FAMILY: "1"
+    SUPPORTS_MACCATALYST: "NO"
+targets:
+  RoSight:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: "Ro Sight"
+        NSCameraUsageDescription: "Ro Sight dùng camera sau và LiDAR để hiển thị cảnh trực tiếp và ước tính khoảng cách."
+        NSLocalNetworkUsageDescription: "Ro Sight kết nối tới máy tính chạy YOLO trong cùng mạng."
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UILaunchScreen: {}
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        CODE_SIGNING_ALLOWED: "NO"
