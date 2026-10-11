@@ -5,18 +5,27 @@ và AltServer. App chưa phát hành trên App Store; IPA phải được ký l�
 Apple Account của người cài. Cần tải IPA từ artifact GitHub Actions trước khi
 bắt đầu.
 
+**Tình trạng hiện tại (12/10/2026):** Workflow iOS mới có trong branch local;
+GitHub hiện chưa có workflow hoặc lượt chạy nên chưa có IPA để tải. Chỉ tiếp
+tục hướng dẫn cài bên dưới sau khi workflow được đưa lên GitHub và có một lượt
+Actions thành công. Muốn chạy thủ công, workflow cũng phải có trên branch mặc
+định của repo.
+
 ## Chọn bản PWA hay native
 
 - **PWA:** miễn phí, không cần ký app. Chạy server trên máy tính, mở URL HTTPS
   tạm thời trong Safari iPhone rồi chọn **Chia sẻ → Thêm vào Màn hình chính**.
   PWA dùng camera iPhone nhưng không đọc được ARKit `sceneDepth`; xem hướng dẫn
   chạy điện thoại trong [README của PWA](../../../04_App/ro-app/README.md).
-- **Native:** có thể dùng ARKit scene depth trên iPhone 12 Pro, bên cạnh chế độ
-  kết nối ESP32. Bản native hiện là app thử nghiệm, không phải bản phát hành.
+- **Native:** có thể dùng ARKit sceneDepth trên iPhone hỗ trợ, bên cạnh chế độ
+  kết nối ESP32. App kiểm tra hỗ trợ ARKit khi chạy; bản native là app thử
+  nghiệm, không phải bản phát hành.
 
 ## 1. Lấy IPA từ GitHub Actions
 
-1. Mở repo GitHub `bartsil/Mini-AI-Camera-Module` và chọn **Actions**.
+1. Sau khi workflow đã có trên GitHub, mở repo `bartsil/Mini-AI-Camera-Module`
+   và chọn **Actions**. Nếu workflow mới chỉ nằm trong branch app, chưa có run
+   nào trên GitHub; workflow thủ công cần có trên branch mặc định trước.
 2. Mở lần chạy thành công của workflow **Build iOS test IPA** trên branch app.
    Workflow tự chạy khi có push thay đổi trong `PhoneApp/iOSLiDARTest/` hoặc
    file workflow.

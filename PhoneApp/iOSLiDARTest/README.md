@@ -73,10 +73,11 @@ instead of being sent to Vision.
 ## iPhone-only mode
 
 Choose **Chỉ dùng iPhone** to use the rear camera and native ARKit scene depth
-without an ESP32. The intended LiDAR target is iPhone 12 Pro and later LiDAR
-models. Unsupported devices display an ARKit capability message. The app stays
-in a waiting state until ARKit supplies a frame with `sceneDepth`; it does not
-label depth as available merely because an AR session was started.
+without an ESP32. Scene depth is available only on supported iPhone hardware;
+the app checks ARKit frame-semantics support at runtime rather than assuming it
+from a model name. Unsupported devices display a capability message. The app
+stays in a waiting state until ARKit supplies a frame with `sceneDepth`; it
+does not label depth as available merely because an AR session was started.
 
 With YOLO enabled, the app sends a portrait JPEG to `POST /api/detect` and maps
 the backend's normalized `[x1, y1, x2, y2]` box center back to the landscape
@@ -124,12 +125,16 @@ untrusted network.
 
 ## Build and install
 
-The repository workflow at `.github/workflows/ios-lidar-test.yml` runs on pushes
-that change the native app or workflow, and also supports manual runs from
-GitHub Actions once the workflow file is present on the repository's default
-branch. It generates the Xcode project with XcodeGen, builds an unsigned iOS
-app, and packages an IPA artifact retained for three days. It does not sign the
-app.
+The workflow definition at `.github/workflows/ios-lidar-test.yml` runs on pushes
+that change the native app or workflow. Manual runs become available after the
+workflow file is present on the repository's default branch. It generates the
+Xcode project with XcodeGen, builds an unsigned iOS app, and packages an IPA
+artifact retained for three days. It does not sign the app.
+
+As of 2026-10-12, this workflow exists only in the local app branch: GitHub
+reports no workflows or runs for the repository, so there is no IPA artifact
+to download and no iOS build to claim. The install guide's Actions steps apply
+after the workflow is published and a successful run has produced the artifact.
 
 The current development host is Windows and has neither `xcodebuild` nor the
 Swift toolchain, so the current native source changes, including speech

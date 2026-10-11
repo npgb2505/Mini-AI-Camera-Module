@@ -29,7 +29,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     @Published var answer = ""
     @Published private(set) var isSpeakingAnswer = false
     @Published private(set) var speechError: String?
-    @Published var status = "Đang khởi động camera LiDAR…"
+    @Published var status = "Chọn chế độ camera để bắt đầu."
     @Published private(set) var phoneFrameFresh = false
     @Published private(set) var phoneDetectionsFresh = false
 

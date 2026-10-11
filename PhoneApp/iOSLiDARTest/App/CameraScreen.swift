@@ -96,7 +96,7 @@ struct CameraScreen: View {
 
                 modeCard(
                     title: "Chỉ dùng iPhone",
-                    subtitle: "Camera sau và ARKit sceneDepth trên iPhone 12 Pro khi thiết bị hỗ trợ; không cần ESP32.",
+                    subtitle: "Camera sau và ARKit sceneDepth khi iPhone hỗ trợ; không cần ESP32.",
                     symbol: "iphone.gen3",
                     tint: .mint
                 ) {
