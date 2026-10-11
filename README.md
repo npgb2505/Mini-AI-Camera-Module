@@ -51,3 +51,4 @@ This project includes:
 - Schematics and PCB design  
 - JLCPCB fabrication files  
 - Example firmware for **Arduino**
+- Native iPhone test app in [`PhoneApp/iOSLiDARTest`](PhoneApp/iOSLiDARTest/README.md), with ESP32 and iPhone-only camera/LiDAR modes

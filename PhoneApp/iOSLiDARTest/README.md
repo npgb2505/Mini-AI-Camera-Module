@@ -1,57 +1,95 @@
-# Ro Sight iPhone test app
+# Ro Sight native iPhone app
 
-This is a small native iOS test app for an iPhone with LiDAR. It shows the
-rear-camera view, reads ARKit scene depth, sends one JPEG frame per second to
-the existing Flask YOLO endpoint, samples LiDAR depth at the center of each
-YOLO bounding box, and can send a typed question and the latest frame to the
-existing Vision endpoint. The app does not use a separate microphone module.
-The iPhone keyboard's built-in dictation can be used in the question field.
+The app opens with a mode chooser. Camera access starts only after choosing a
+mode, so an ESP32-only session does not open the iPhone camera.
 
-Depth-to-box association is a first-pass estimate for the portrait rear-camera
-orientation. Check the distance against known objects on the iPhone before
-depending on it. If the depth map has low confidence or no valid sample, the
-app displays that the distance is unavailable.
+## ESP32 mode
 
-## Create the iPhone install file
+This mode shows a JPEG and fresh device detections/ToF telemetry, then lets the
+user ask Vision about a new ESP32 frame. The phone talks to the existing Flask
+backend; it does not connect directly to USB or bypass the backend session.
+The backend can reach the board through either of its existing transports:
 
-The GitHub Actions workflow at the repository root creates an unsigned iOS
-package on a hosted macOS runner. It needs no Apple signing certificate or
-paid developer membership. After this folder and the workflow are pushed to
-the repository, open Actions, run “Build iOS test IPA”, and download the
-RoSight-unsigned-ipa artifact.
+- **USB bridge:** connect the computer to the ESP32 and start
+  `04_App/ios_app/start_device_bridge.ps1` on that computer.
+- **Firmware Wi-Fi:** configure `RO_DEVICE_FIRMWARE_URL` on the Flask server to
+  the ESP32 firmware address.
 
-An unsigned package cannot be opened by itself. On Windows, install AltServer
-using the Windows instructions from AltStore, connect and trust the iPhone,
-then hold Shift while clicking AltServer in the system tray and choose
-“Sideload .ipa…” to select the downloaded package. AltServer signs and
-installs it with the free Apple Account. Enable Developer Mode on the iPhone
-if prompted. Free sideloaded apps expire after seven days; connect the iPhone
-to AltServer and refresh or reinstall them before they expire.
+The backend requires an explicit `operation_enabled=true` before returning an
+image or accepting a Vision question. A legacy read-only USB probe that does
+not report operation state can appear connected but remains locked; the app
+does not infer that standby is off or bypass the backend check.
 
-## Connect the app to the existing backend
+The native app reads `GET /api/device/status`. It treats the device as ready
+only when the backend reports `source=device`, `device_connected=true`,
+`operation_enabled=true`, a live camera, a positive frame sequence, and a
+camera age of at most 350 ms. Standby, unknown operation state, a stale frame,
+or a disconnected device disables asking and hides the old preview.
 
-Run `start_phone.ps1` on the Windows computer and enter its generated HTTPS
-tunnel URL in the iPhone settings. The current scripts bind Flask to
-`127.0.0.1`, so a LAN IP will not work by default. LAN access requires
-intentionally binding Flask to the computer's network interface and allowing
-the port through Windows Firewall; use HTTPS on a trusted network because
-Basic Auth over plain HTTP does not encrypt the credentials. Never enter
-`127.0.0.1` on the iPhone; that address points back to the phone. If the
-tunnel uses Basic Auth, enter its username and password separately from the
-Ro Sight account. Passwords stay in the app's current session.
+For preview, the app requests `GET /api/device/frame?frame_seq=…`, verifies the
+JPEG bytes and `X-Frame-Seq`, and matches the returned sequence to the status
+snapshot. The USB bridge requires the exact requested sequence. Direct
+firmware Wi-Fi may return a newer sequence because it fetches the latest image.
+YOLO detections are shown only when their frame sequence and freshness match
+the displayed image. ToF is shown only when the backend marks the reading as
+device-originated and fresh; zones are separate sensor readings and are not
+assigned to objects in the JPEG.
 
-Create an account in Ro Sight first, or use an account that already exists.
-Enter that app username and password in the iPhone settings. The app signs in
-through `POST /api/auth/login` and keeps the session cookie in its current
-network session. These credentials are kept in memory by the app. If the
-tunnel itself asks for HTTP Basic Auth, enter those separate credentials in
-the Basic Auth fields.
+When the user asks a question, the app sends JSON to
+`POST /api/device/ask` with `question` and `trigger: "manual"`; it does not send
+the preview JPEG as the Vision input. Flask obtains a current ESP32 image and
+rechecks operation state, camera/frame age, and available sensor context before
+calling the configured Vision provider. The backend remains the final
+freshness check, so a frame that expires after the status response is rejected
+instead of being sent to Vision.
 
-Press the play button to send live frames to `POST /api/detect`. The backend
-returns normalized YOLO boxes; the app samples LiDAR at each box center using
-the same normalized image coordinates. Ask a typed question to send the latest
-frame and question to `POST /api/analyze`. This is the Flask endpoint used by
-the existing app. The server needs its YOLO model, plus an available Vision
-provider (local Ollama or the configured OpenAI API) for a Vision LLM answer.
-If Vision is unavailable, the app displays the backend's YOLO summary and says
-that Vision was not called.
+## iPhone-only mode
+
+Choose **Chỉ dùng iPhone** to use the rear camera and native ARKit scene depth
+without an ESP32. The intended LiDAR target is iPhone 12 Pro and later LiDAR
+models. Unsupported devices display an ARKit capability message.
+
+With YOLO enabled, the app sends a portrait JPEG to `POST /api/detect` and maps
+the backend's normalized `[x1, y1, x2, y2]` box center back to the landscape
+ARKit depth map. It samples a small neighborhood and uses only valid depth
+values. This is an estimate that still needs a known-distance check on the
+phone. A typed question is enabled only while the local camera frame is at most
+2.5 seconds old; it sends that iPhone JPEG and the question as multipart form
+data to `POST /api/analyze`. Vision can fall back to the backend's YOLO summary
+when no Vision provider is configured.
+
+The question fields use the iPhone keyboard's built-in dictation. The app does
+not add a microphone feature.
+
+## Backend connection
+
+Open settings and enter the Flask base URL, a Ro Sight account, and optional
+tunnel Basic Auth credentials. The app account and tunnel credentials are
+separate. The account password remains in app memory; the base URL is saved by
+iOS app storage. Do not enter `127.0.0.1` on the phone because that points back
+to the phone. A LAN URL works only when Flask is bound to the computer's LAN
+interface and the firewall permits the connection. Otherwise use a reachable,
+trusted HTTPS URL. Avoid sending account credentials over plain HTTP on an
+untrusted network.
+
+## Build and install
+
+The repository workflow at `.github/workflows/ios-lidar-test.yml` is a manual
+`workflow_dispatch` job on macOS. It generates the Xcode project with XcodeGen,
+builds an unsigned iOS app, and packages an IPA artifact. It does not sign the
+app. To run it, the workflow must be available in the remote repository and
+the account must have permission to start Actions. The current local branch
+has not been pushed, and no hosted build was started for this work.
+
+An unsigned IPA must be signed for installation. AltServer/AltStore can
+sideload it with a free Apple Account; follow the current AltStore instructions
+for setup and refresh timing.
+
+## Verification limits
+
+Source review can confirm the app's request paths, JSON fields, frame-sequence
+checks, and ARKit coordinate transform. It cannot confirm camera permissions,
+LiDAR alignment, device standby behavior, JPEG cadence, or Vision latency on
+physical hardware. This native app has not been run on an iPhone or ESP32 as
+part of the current local changes. Do not treat source review or an unsigned
+IPA build as a real-device test.
