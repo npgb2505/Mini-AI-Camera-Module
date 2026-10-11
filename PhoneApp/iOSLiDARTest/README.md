@@ -20,6 +20,15 @@ image or accepting a Vision question. A legacy read-only USB probe that does
 not report operation state can appear connected but remains locked; the app
 does not infer that standby is off or bypass the backend check.
 
+Firmware may start every boot with `operation_enabled=false`. When status
+reports `mode_button_configured=false` or `button_inputs_configured=false`, the
+screen explains that standby will persist on that pin profile; it includes the
+`pin_profile` ID and camera/external map states when the optional fields are
+present. There is no remote operation-enable command. Network and status remain
+available, while capture, inference, ToF, alerts, and Vision asking remain
+locked until a verified physical MODE input exists. Older firmware can omit
+these optional status fields; the app decodes them as unknown.
+
 The native app reads `GET /api/device/status`. It treats the device as ready
 only when the backend reports `source=device`, `device_connected=true`,
 `operation_enabled=true`, a live camera, a positive frame sequence, and a
@@ -52,11 +61,13 @@ models. Unsupported devices display an ARKit capability message.
 With YOLO enabled, the app sends a portrait JPEG to `POST /api/detect` and maps
 the backend's normalized `[x1, y1, x2, y2]` box center back to the landscape
 ARKit depth map. It samples a small neighborhood and uses only valid depth
-values. This is an estimate that still needs a known-distance check on the
-phone. A typed question is enabled only while the local camera frame is at most
-2.5 seconds old; it sends that iPhone JPEG and the question as multipart form
-data to `POST /api/analyze`. Vision can fall back to the backend's YOLO summary
-when no Vision provider is configured.
+values. YOLO detections and their paired depth estimates are hidden once the
+processed frame is more than 2.5 seconds old; the live camera may have advanced
+since that YOLO frame. This is an estimate that still needs a known-distance
+check on the phone. A typed question is enabled only while the local camera
+frame is at most 2.5 seconds old; it sends that iPhone JPEG and the question as
+multipart form data to `POST /api/analyze`. Vision can fall back to the
+backend's YOLO summary when no Vision provider is configured.
 
 The question fields use the iPhone keyboard's built-in dictation. The app does
 not add a microphone feature.
@@ -78,8 +89,10 @@ The repository workflow at `.github/workflows/ios-lidar-test.yml` is a manual
 `workflow_dispatch` job on macOS. It generates the Xcode project with XcodeGen,
 builds an unsigned iOS app, and packages an IPA artifact. It does not sign the
 app. This source is on local branch `codex/ios-lidar-test-2026-10-11` in the
-configured repository `bartsil/Mini-AI-Camera-Module`, with local commits
-`59a064c` and `295771c`. A push was attempted and GitHub returned HTTP 403
+configured repository `bartsil/Mini-AI-Camera-Module`, with commits
+`59a064c`, `295771c`, and `0a29d78`; recent freshness and firmware-status
+improvements are present on the local branch. A push was attempted and GitHub
+returned HTTP 403
 because account `npgb2505` has READ-only access. The branch has not been pushed,
 and no hosted build or workflow run was started for this work.
 

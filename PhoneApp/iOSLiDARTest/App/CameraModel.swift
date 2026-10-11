@@ -17,7 +17,8 @@ final class CameraModel: ObservableObject {
     @Published var detections: [FusedDetection] = []
     @Published var answer = ""
     @Published var status = "Đang khởi động camera LiDAR…"
-    @Published private(set) var latestPhoneFrameAt: Date?
+    @Published private(set) var phoneFrameFresh = false
+    @Published private(set) var phoneDetectionsFresh = false
 
     private var backendBaseURL = ""
     private var accountUsername = ""
@@ -31,9 +32,11 @@ final class CameraModel: ObservableObject {
     private var authenticationGeneration = 0
     private var latestJPEG: Data?
     private var latestJPEGAt: Date?
+    private var phoneDetectionsCapturedAt: Date?
     private var lastVisionStatusCheck: Date?
     private var phoneModeActive = false
     private var phoneModeGeneration = 0
+    private var phoneDetectionGeneration = 0
     private var phoneAskGeneration = 0
     private var deviceAskGeneration = 0
 
@@ -54,11 +57,23 @@ final class CameraModel: ObservableObject {
     private static let deviceFrameFreshnessMs = 350.0
     private static let maximumDeviceFrameBytes = 2 * 1024 * 1024
     private static let phoneFrameFreshnessSeconds = 2.5
+    private static let phoneDetectionFreshnessSeconds = 2.5
 
     var phoneHasFreshFrame: Bool {
         guard let latestJPEGAt else { return false }
         let age = Date().timeIntervalSince(latestJPEGAt)
         return age >= 0 && age <= Self.phoneFrameFreshnessSeconds
+    }
+
+    func refreshPhoneFreshness() {
+        let frameFresh = phoneHasFreshFrame
+        if phoneFrameFresh != frameFresh { phoneFrameFresh = frameFresh }
+
+        let detectionFresh = phoneDetectionsCapturedAt.map { capturedAt in
+            let age = Date().timeIntervalSince(capturedAt)
+            return age >= 0 && age <= Self.phoneDetectionFreshnessSeconds
+        } ?? false
+        if phoneDetectionsFresh != detectionFresh { phoneDetectionsFresh = detectionFresh }
     }
 
     func configure(
@@ -125,12 +140,17 @@ final class CameraModel: ObservableObject {
 
     func startPhoneMode() {
         phoneModeGeneration += 1
+        phoneDetectionGeneration += 1
         phoneAskGeneration += 1
         phoneModeActive = true
+        detectionEnabled = false
+        isDetecting = false
         isAsking = false
         latestJPEG = nil
         latestJPEGAt = nil
-        latestPhoneFrameAt = nil
+        phoneFrameFresh = false
+        phoneDetectionsCapturedAt = nil
+        phoneDetectionsFresh = false
         centerDistance = nil
         detections = []
         answer = ""
@@ -139,16 +159,30 @@ final class CameraModel: ObservableObject {
 
     func stopPhoneMode() {
         phoneModeGeneration += 1
+        phoneDetectionGeneration += 1
         phoneAskGeneration += 1
         phoneModeActive = false
         isAsking = false
+        isDetecting = false
         detectionEnabled = false
         latestJPEG = nil
         latestJPEGAt = nil
-        latestPhoneFrameAt = nil
+        phoneFrameFresh = false
+        phoneDetectionsCapturedAt = nil
+        phoneDetectionsFresh = false
         centerDistance = nil
         detections = []
         answer = ""
+    }
+
+    func setPhoneDetectionEnabled(_ enabled: Bool) {
+        guard detectionEnabled != enabled else { return }
+        phoneDetectionGeneration += 1
+        detectionEnabled = enabled
+        detections = []
+        phoneDetectionsCapturedAt = nil
+        phoneDetectionsFresh = false
+        status = enabled ? "Đang chờ kết quả YOLO mới…" : "YOLO đã tạm dừng; camera và LiDAR vẫn đang chạy."
     }
 
     func clearDevicePreview() {
@@ -229,7 +263,23 @@ final class CameraModel: ObservableObject {
             return "Backend chưa trả trạng thái camera ESP32."
         }
         if status.resolvedOperationEnabled == false {
-            return "ESP32 đang tạm dừng. Nhấn nút MODE trên thiết bị để bật lại."
+            let health = status.deviceHealth
+            if health?.modeButtonConfigured == false || health?.buttonInputsConfigured == false {
+                let profile = health?.pinProfile
+                let inputReason = health?.modeButtonConfigured == false
+                    ? "GPIO nút MODE chưa được cấu hình"
+                    : "GPIO nút vào chưa được cấu hình"
+                var details: [String] = []
+                if let id = profile?.id, !id.isEmpty { details.append("profile \(id)") }
+                if let camera = profile?.cameraMapStatus { details.append("camera map \(camera)") }
+                if let external = profile?.externalMapStatus { details.append("external map \(external)") }
+                let profileDescription = details.isEmpty ? "" : " (\(details.joined(separator: "; ")))."
+                return "ESP32 giữ standby sau reset vì \(inputReason).\(profileDescription) App không có lệnh bật từ xa; status/mạng vẫn dùng được, còn capture, inference, ToF, cảnh báo và Vision bị khóa."
+            }
+            if health?.modeButtonConfigured == true {
+                return "ESP32 đang tạm dừng. Có thể bật bằng nút MODE vật lý đã cấu hình; app không có lệnh bật từ xa."
+            }
+            return "ESP32 đang tạm dừng. Chưa xác nhận GPIO nút MODE và app không có lệnh bật từ xa; status/mạng vẫn dùng được."
         }
         guard status.resolvedOperationEnabled == true else {
             return "Đang chờ ESP32 xác nhận trạng thái hoạt động."
@@ -350,23 +400,31 @@ final class CameraModel: ObservableObject {
     func receiveFrame(_ jpeg: Data, depth: DepthSnapshot, shouldRunYOLO: Bool) async {
         guard phoneModeActive else { return }
         let modeGeneration = phoneModeGeneration
+        let capturedAt = Date()
         latestJPEG = jpeg
-        latestJPEGAt = Date()
-        latestPhoneFrameAt = latestJPEGAt
+        latestJPEGAt = capturedAt
+        phoneFrameFresh = true
         centerDistance = depth.centerDistance()
         guard shouldRunYOLO, detectionEnabled, !isDetecting else { return }
         guard !backendBaseURL.isEmpty else {
             status = "Cần nhập địa chỉ Flask trước khi chạy YOLO."
             detectionEnabled = false
+            detections = []
+            phoneDetectionsCapturedAt = nil
+            phoneDetectionsFresh = false
             return
         }
 
         isDetecting = true
-        defer { isDetecting = false }
+        let detectionGeneration = phoneDetectionGeneration
+        defer { if modeGeneration == phoneModeGeneration { isDetecting = false } }
         status = "Đang gửi khung hình sang YOLO…"
         do {
             let (data, response) = try await sendImage(endpoint: "detect", image: jpeg)
-            guard phoneModeActive, modeGeneration == phoneModeGeneration else { return }
+            guard phoneModeActive,
+                  modeGeneration == phoneModeGeneration,
+                  detectionEnabled,
+                  detectionGeneration == phoneDetectionGeneration else { return }
             let payload = try Self.decode(YOLOPayload.self, data: data, response: response)
             detections = payload.detections.prefix(12).map { item in
                 FusedDetection(
@@ -375,10 +433,19 @@ final class CameraModel: ObservableObject {
                     distanceMeters: depth.distance(normalizedBox: item.box)
                 )
             }
+            phoneDetectionsCapturedAt = capturedAt
+            let detectionAge = Date().timeIntervalSince(capturedAt)
+            phoneDetectionsFresh = detectionAge >= 0 && detectionAge <= Self.phoneDetectionFreshnessSeconds
             let timing = payload.inferenceMs.map { " · \(Int($0)) ms" } ?? ""
             status = "YOLO: \(detections.count) vật thể\(timing) · khoảng cách ghép từ LiDAR."
         } catch {
-            if phoneModeActive, modeGeneration == phoneModeGeneration, !Task.isCancelled {
+            if phoneModeActive,
+               modeGeneration == phoneModeGeneration,
+               detectionGeneration == phoneDetectionGeneration,
+               !Task.isCancelled {
+                detections = []
+                phoneDetectionsCapturedAt = nil
+                phoneDetectionsFresh = false
                 status = error.localizedDescription
             }
         }

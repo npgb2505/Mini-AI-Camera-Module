@@ -88,12 +88,30 @@ struct DeviceLinkPayload: Decodable {
 struct DeviceHealthPayload: Decodable {
     let bootId: String?
     let operationEnabled: Bool?
+    let buttonInputsConfigured: Bool?
+    let modeButtonConfigured: Bool?
+    let pinProfile: DevicePinProfile?
     let tofOk: Bool?
 
     enum CodingKeys: String, CodingKey {
         case bootId = "boot_id"
         case operationEnabled = "operation_enabled"
+        case buttonInputsConfigured = "button_inputs_configured"
+        case modeButtonConfigured = "mode_button_configured"
+        case pinProfile = "pin_profile"
         case tofOk = "tof_ok"
+    }
+}
+
+struct DevicePinProfile: Decodable {
+    let id: String?
+    let cameraMapStatus: String?
+    let externalMapStatus: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case cameraMapStatus = "camera_map_status"
+        case externalMapStatus = "external_map_status"
     }
 }
 

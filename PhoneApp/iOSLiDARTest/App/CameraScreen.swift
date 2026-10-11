@@ -174,6 +174,16 @@ struct CameraScreen: View {
             .padding(.horizontal, 18)
             .padding(.top, 10)
             .padding(.bottom, 8)
+            .task {
+                while !Task.isCancelled {
+                    model.refreshPhoneFreshness()
+                    do {
+                        try await Task.sleep(nanoseconds: 250_000_000)
+                    } catch {
+                        break
+                    }
+                }
+            }
         }
     }
 
@@ -268,7 +278,7 @@ struct CameraScreen: View {
                         || accountPassword.isEmpty {
                         showSettings = true
                     } else {
-                        model.detectionEnabled.toggle()
+                        model.setPhoneDetectionEnabled(!model.detectionEnabled)
                     }
                 } label: {
                     Image(systemName: model.detectionEnabled ? "pause.fill" : "play.fill")
@@ -280,7 +290,7 @@ struct CameraScreen: View {
                 .accessibilityLabel(model.detectionEnabled ? "Tạm dừng YOLO" : "Bật YOLO")
             }
 
-            if !model.detections.isEmpty {
+            if model.phoneDetectionsFresh, !model.detections.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(model.detections) { item in
@@ -300,8 +310,15 @@ struct CameraScreen: View {
                         }
                     }
                 }
+                Text("Khoảng cách được ghép từ cùng ảnh YOLO; kết quả cũ tự ẩn.")
+                    .font(.system(size: 9, weight: .regular, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.5))
+            } else if model.phoneDetectionsFresh {
+                Text("Khung YOLO mới chưa thấy vật thể rõ.")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.55))
             } else {
-                Text("Vật thể YOLO và khoảng cách LiDAR sẽ xuất hiện tại đây.")
+                Text(model.detectionEnabled ? "Đang chờ kết quả YOLO từ một khung mới." : "Bật YOLO để nhận diện; kết quả cũ sẽ tự ẩn.")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.55))
             }
@@ -330,9 +347,12 @@ struct CameraScreen: View {
                             .background(.mint, in: Circle())
                     }
                 }
-                .disabled(model.isAsking || !model.phoneHasFreshFrame || phoneQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(model.isAsking || !model.phoneFrameFresh || phoneQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityLabel("Hỏi Vision LLM về ảnh iPhone")
             }
+            Text(model.phoneFrameFresh ? "Khung camera mới sẵn sàng để hỏi." : "Đang chờ khung camera mới; thao tác hỏi đang khóa.")
+                .font(.system(size: 10, weight: .regular, design: .rounded))
+                .foregroundStyle(model.phoneFrameFresh ? .mint.opacity(0.8) : .orange.opacity(0.85))
 
             if !model.answer.isEmpty {
                 Text(model.answer)
