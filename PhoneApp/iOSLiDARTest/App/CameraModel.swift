@@ -485,7 +485,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             return nil
         }
 
-        let eventKey = "\(bootID.utf8.count):\(bootID):\(pressID)"
+        let eventKey = "\(deviceID.utf8.count):\(deviceID):\(bootID.utf8.count):\(bootID):\(pressID)"
         guard handledDeviceButtonEventKeys.insert(eventKey).inserted else { return nil }
         handledDeviceButtonEventOrder.append(eventKey)
         if handledDeviceButtonEventOrder.count > Self.maximumHandledDeviceButtonEvents {

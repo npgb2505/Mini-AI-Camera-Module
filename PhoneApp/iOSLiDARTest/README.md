@@ -48,7 +48,8 @@ assigned to objects in the JPEG.
 
 The app also handles a fresh firmware `button_event` from this status response.
 It verifies `button_id`, `action`, `press_id`, event age, device ID, and boot ID,
-then deduplicates by `(boot_id, press_id)` across launches on this installation.
+then deduplicates by `(device_id, boot_id, press_id)` across launches on this
+installation.
 The event's operation state is used only when its device-clock `t_ms` is newer
 than the matching health snapshot. `mode` updates the shown operation state.
 `capture_image` fetches one new JPEG through the backend, validates its bytes
