@@ -237,6 +237,43 @@ struct CameraScreen: View {
         .accessibilityLabel("Cài đặt backend")
     }
 
+    private func answerSpeechControl(for text: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Button {
+                if model.isSpeakingAnswer {
+                    model.stopSpeakingAnswer()
+                } else {
+                    model.speakAnswer(text)
+                }
+            } label: {
+                Label(
+                    model.isSpeakingAnswer ? "Dừng đọc" : "Đọc câu trả lời",
+                    systemImage: model.isSpeakingAnswer ? "stop.fill" : "speaker.wave.2.fill"
+                )
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(.mint, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Phát giọng nói bằng loa iPhone; không dùng loa ESP32.")
+
+            Text(model.isSpeakingAnswer
+                 ? "Đang phát âm thanh từ iPhone."
+                 : "Đọc qua iPhone; loa ESP32 không tham gia.")
+                .font(.system(size: 9, weight: .regular, design: .rounded))
+                .foregroundStyle(.white.opacity(0.52))
+
+            if let speechError = model.speechError {
+                Text(speechError)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private var distanceReadout: some View {
         VStack(spacing: 7) {
             Image(systemName: "scope")
@@ -355,13 +392,16 @@ struct CameraScreen: View {
                 .foregroundStyle(model.phoneFrameFresh ? .mint.opacity(0.8) : .orange.opacity(0.85))
 
             if !model.answer.isEmpty {
-                Text(model.answer)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(11)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: 9) {
+                    Text(model.answer)
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                    answerSpeechControl(for: model.answer)
+                }
+                .padding(11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
             }
 
             Text("Ảnh do camera iPhone chụp; ARKit LiDAR ghép khoảng cách tại tâm bbox YOLO. Số đo cần kiểm tra thực tế.")
@@ -560,6 +600,7 @@ struct CameraScreen: View {
                                     .font(.system(size: 13, weight: .medium, design: .rounded))
                                     .foregroundStyle(.white)
                                     .fixedSize(horizontal: false, vertical: true)
+                                answerSpeechControl(for: model.deviceAnswer)
                             }
                             .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -618,6 +659,9 @@ struct CameraScreen: View {
     }
 
     private func selectMode(_ mode: RoSightMode?) {
+        if selectedMode != mode {
+            model.stopSpeakingAnswer()
+        }
         if selectedMode == .phone, mode != .phone {
             phoneAskTask?.cancel()
             phoneAskTask = nil

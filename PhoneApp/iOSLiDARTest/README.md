@@ -72,6 +72,13 @@ backend's YOLO summary when no Vision provider is configured.
 The question fields use the iPhone keyboard's built-in dictation. The app does
 not add a microphone feature.
 
+After an answer appears in either mode, tap **Đọc câu trả lời** to have the
+iPhone read it with `AVSpeechSynthesizer`, or tap **Dừng đọc** to stop. Speech
+uses the iPhone playback audio session and speaker route; it does not use or
+verify the ESP32 MAX98357A amplifier. This is output only: the app does not
+request microphone access for speech, and question input remains the iOS
+keyboard's Dictation.
+
 ## Backend connection
 
 Open settings and enter the Flask base URL, a Ro Sight account, and optional
@@ -90,11 +97,15 @@ The repository workflow at `.github/workflows/ios-lidar-test.yml` is a manual
 builds an unsigned iOS app, and packages an IPA artifact. It does not sign the
 app. This source is on local branch `codex/ios-lidar-test-2026-10-11` in the
 configured repository `bartsil/Mini-AI-Camera-Module`, with commits
-`59a064c`, `295771c`, and `0a29d78`; recent freshness and firmware-status
-improvements are present on the local branch. A push was attempted and GitHub
+`59a064c`, `295771c`, `0a29d78`, and `4149b17`; the current local branch also
+includes iPhone speech playback. A push was attempted and GitHub
 returned HTTP 403
 because account `npgb2505` has READ-only access. The branch has not been pushed,
 and no hosted build or workflow run was started for this work.
+
+The current development host is Windows and has neither `xcodebuild` nor the
+Swift toolchain, so the current native source changes, including speech
+playback, have not been compiled.
 
 An unsigned IPA must be signed for installation. AltServer/AltStore can
 sideload it with a free Apple Account; follow the current AltStore instructions
@@ -104,7 +115,7 @@ for setup and refresh timing.
 
 Source review can confirm the app's request paths, JSON fields, frame-sequence
 checks, and ARKit coordinate transform. It cannot confirm camera permissions,
-LiDAR alignment, device standby behavior, JPEG cadence, or Vision latency on
-physical hardware. This native app has not been run on an iPhone or ESP32 as
-part of the current local changes. Do not treat source review or an unsigned
-IPA build as a real-device test.
+LiDAR alignment, device standby behavior, JPEG cadence, speech playback/routing,
+or Vision latency on physical hardware. This native app has not been run on an
+iPhone or ESP32 as part of the current local changes. Do not treat source review
+or an unsigned IPA build as a real-device test.

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AVFoundation
 
 struct FusedDetection: Identifiable {
     let id = UUID()
@@ -9,13 +10,15 @@ struct FusedDetection: Identifiable {
 }
 
 @MainActor
-final class CameraModel: ObservableObject {
+final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSynthesizerDelegate {
     @Published var detectionEnabled = false
     @Published var isDetecting = false
     @Published var isAsking = false
     @Published var centerDistance: Double?
     @Published var detections: [FusedDetection] = []
     @Published var answer = ""
+    @Published private(set) var isSpeakingAnswer = false
+    @Published private(set) var speechError: String?
     @Published var status = "Đang khởi động camera LiDAR…"
     @Published private(set) var phoneFrameFresh = false
     @Published private(set) var phoneDetectionsFresh = false
@@ -39,6 +42,9 @@ final class CameraModel: ObservableObject {
     private var phoneDetectionGeneration = 0
     private var phoneAskGeneration = 0
     private var deviceAskGeneration = 0
+    private let speechSynthesizer = AVSpeechSynthesizer()
+    private var activeSpeechUtteranceID: ObjectIdentifier?
+    private var speechSessionActive = false
 
     @Published private(set) var deviceConnection: DeviceConnectionPayload?
     @Published private(set) var deviceFrameData: Data?
@@ -58,6 +64,11 @@ final class CameraModel: ObservableObject {
     private static let maximumDeviceFrameBytes = 2 * 1024 * 1024
     private static let phoneFrameFreshnessSeconds = 2.5
     private static let phoneDetectionFreshnessSeconds = 2.5
+
+    override init() {
+        super.init()
+        speechSynthesizer.delegate = self
+    }
 
     var phoneHasFreshFrame: Bool {
         guard let latestJPEGAt else { return false }
@@ -91,6 +102,7 @@ final class CameraModel: ObservableObject {
             || accountPassword != self.accountPassword
             || accessUsername != self.accessUsername
             || accessPassword != self.accessPassword {
+            stopSpeakingAnswer()
             authenticationGeneration += 1
             authenticationTask?.cancel()
             authenticationTask = nil
@@ -139,6 +151,7 @@ final class CameraModel: ObservableObject {
     }
 
     func startPhoneMode() {
+        stopSpeakingAnswer()
         phoneModeGeneration += 1
         phoneDetectionGeneration += 1
         phoneAskGeneration += 1
@@ -158,6 +171,7 @@ final class CameraModel: ObservableObject {
     }
 
     func stopPhoneMode() {
+        stopSpeakingAnswer()
         phoneModeGeneration += 1
         phoneDetectionGeneration += 1
         phoneAskGeneration += 1
@@ -173,6 +187,72 @@ final class CameraModel: ObservableObject {
         centerDistance = nil
         detections = []
         answer = ""
+    }
+
+    func speakAnswer(_ text: String) {
+        stopSpeakingAnswer()
+        let cleanedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanedText.isEmpty else { return }
+
+        speechError = nil
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            try audioSession.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try audioSession.setActive(true)
+            speechSessionActive = true
+        } catch {
+            speechError = "Không mở được âm thanh trên iPhone: \(error.localizedDescription)"
+            deactivateSpeechSession()
+            return
+        }
+
+        let utterance = AVSpeechUtterance(string: cleanedText)
+        utterance.voice = AVSpeechSynthesisVoice(language: "vi-VN")
+        activeSpeechUtteranceID = ObjectIdentifier(utterance)
+        isSpeakingAnswer = true
+        speechSynthesizer.speak(utterance)
+    }
+
+    func stopSpeakingAnswer() {
+        if activeSpeechUtteranceID != nil {
+            speechSynthesizer.stopSpeaking(at: .immediate)
+        }
+        activeSpeechUtteranceID = nil
+        isSpeakingAnswer = false
+        deactivateSpeechSession()
+    }
+
+    nonisolated func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        didFinish utterance: AVSpeechUtterance
+    ) {
+        let utteranceID = ObjectIdentifier(utterance)
+        Task { @MainActor [weak self] in
+            self?.finishSpeech(utteranceID: utteranceID)
+        }
+    }
+
+    nonisolated func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        didCancel utterance: AVSpeechUtterance
+    ) {
+        let utteranceID = ObjectIdentifier(utterance)
+        Task { @MainActor [weak self] in
+            self?.finishSpeech(utteranceID: utteranceID)
+        }
+    }
+
+    private func finishSpeech(utteranceID: ObjectIdentifier) {
+        guard activeSpeechUtteranceID == utteranceID else { return }
+        activeSpeechUtteranceID = nil
+        isSpeakingAnswer = false
+        deactivateSpeechSession()
+    }
+
+    private func deactivateSpeechSession() {
+        guard speechSessionActive else { return }
+        speechSessionActive = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
     }
 
     func setPhoneDetectionEnabled(_ enabled: Bool) {
@@ -365,6 +445,7 @@ final class CameraModel: ObservableObject {
         }
 
         isDeviceAsking = true
+        stopSpeakingAnswer()
         deviceAskGeneration += 1
         let askGeneration = deviceAskGeneration
         let generation = authenticationGeneration
@@ -467,6 +548,7 @@ final class CameraModel: ObservableObject {
             return
         }
 
+        stopSpeakingAnswer()
         isAsking = true
         phoneAskGeneration += 1
         let askGeneration = phoneAskGeneration
