@@ -30,9 +30,11 @@ struct DeviceStatusPayload: Decodable {
     let tofAgeMs: Double?
     let tofBootId: String?
     let tofMode: String?
+    let tofOk: Bool?
     let operationEnabled: Bool?
     let deviceHealth: DeviceHealthPayload?
     let buttonEvent: DeviceButtonEventPayload?
+    let buttonEventAgeMs: Int?
 
     enum CodingKeys: String, CodingKey {
         case source, detections, zones
@@ -48,13 +50,27 @@ struct DeviceStatusPayload: Decodable {
         case tofAgeMs = "tof_age_ms"
         case tofBootId = "tof_boot_id"
         case tofMode = "tof_mode"
+        case tofOk = "tof_ok"
         case operationEnabled = "operation_enabled"
         case deviceHealth = "device_health"
         case buttonEvent = "button_event"
+        case buttonEventAgeMs = "button_event_age_ms"
     }
 
     var resolvedOperationEnabled: Bool? {
-        operationEnabled ?? deviceHealth?.operationEnabled ?? buttonEvent?.operationEnabled
+        if let event = buttonEvent,
+           let eventAge = buttonEventAgeMs,
+           (0...10_000).contains(eventAge),
+           let health = deviceHealth,
+           event.deviceId == health.deviceId,
+           event.bootId == health.bootId,
+           let eventTime = event.tMs,
+           let healthTime = health.tMs,
+           eventTime > healthTime,
+           let enabled = event.operationEnabled {
+            return enabled
+        }
+        return operationEnabled ?? deviceHealth?.operationEnabled ?? buttonEvent?.operationEnabled
     }
 
     var resolvedDetectionsFrameSeq: Int? {
@@ -86,7 +102,9 @@ struct DeviceLinkPayload: Decodable {
 }
 
 struct DeviceHealthPayload: Decodable {
+    let deviceId: String?
     let bootId: String?
+    let tMs: Int?
     let operationEnabled: Bool?
     let buttonInputsConfigured: Bool?
     let modeButtonConfigured: Bool?
@@ -94,7 +112,9 @@ struct DeviceHealthPayload: Decodable {
     let tofOk: Bool?
 
     enum CodingKeys: String, CodingKey {
+        case deviceId = "device_id"
         case bootId = "boot_id"
+        case tMs = "t_ms"
         case operationEnabled = "operation_enabled"
         case buttonInputsConfigured = "button_inputs_configured"
         case modeButtonConfigured = "mode_button_configured"
@@ -116,9 +136,24 @@ struct DevicePinProfile: Decodable {
 }
 
 struct DeviceButtonEventPayload: Decodable {
+    let type: String?
+    let deviceId: String?
+    let bootId: String?
+    let buttonId: String?
+    let action: String?
+    let pressedAtMs: Int?
+    let pressId: Int?
+    let tMs: Int?
     let operationEnabled: Bool?
 
     enum CodingKeys: String, CodingKey {
+        case type, action
+        case deviceId = "device_id"
+        case bootId = "boot_id"
+        case buttonId = "button_id"
+        case pressedAtMs = "pressed_at_ms"
+        case pressId = "press_id"
+        case tMs = "t_ms"
         case operationEnabled = "operation_enabled"
     }
 }

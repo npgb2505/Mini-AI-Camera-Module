@@ -462,6 +462,12 @@ struct CameraScreen: View {
                     }
                     .padding(13)
                     .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 17))
+                    if let message = model.deviceButtonMessage {
+                        Text(message)
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(.mint)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     VStack(spacing: 10) {
                         if model.deviceCameraReady,
@@ -490,6 +496,34 @@ struct CameraScreen: View {
                             .padding(15)
                             .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
                         }
+                    }
+
+                    if let error = model.deviceCaptureError {
+                        Text(error)
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if model.isCapturingDeviceFrame {
+                        ProgressView("Đang lấy JPEG từ nút chụp…")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .tint(.mint)
+                    }
+                    if let data = model.deviceCapturedFrameData,
+                       let uiImage = UIImage(data: data) {
+                        VStack(alignment: .leading, spacing: 9) {
+                            sectionLabel("ẢNH ĐÃ CHỤP TỪ NÚT")
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                            Text("JPEG \(model.deviceCapturedFrameSequence ?? 0) · press #\(model.deviceCapturedFramePressId ?? 0) · giữ trong phiên app; không gọi Vision")
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                        .padding(12)
+                        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 17))
                     }
 
                     if !model.deviceDetections.isEmpty {
@@ -592,7 +626,7 @@ struct CameraScreen: View {
                         }
                         if !model.deviceAnswer.isEmpty {
                             VStack(alignment: .leading, spacing: 7) {
-                                Text("TRẢ LỜI VỀ KHUNG \(model.deviceAnswerFrameSequence.map { String($0) } ?? "MỚI NHẤT")")
+                                Text("TRẢ LỜI VỀ KHUNG \(model.deviceAnswerFrameSequence.map { String($0) } ?? "MỚI NHẤT")\(model.deviceAnswerButtonSourceLabel)")
                                     .font(.system(size: 9, weight: .bold, design: .rounded))
                                     .tracking(1)
                                     .foregroundStyle(.mint)

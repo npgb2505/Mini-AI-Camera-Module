@@ -9,6 +9,16 @@ struct FusedDetection: Identifiable {
     let distanceMeters: Double?
 }
 
+private struct PendingDeviceButtonAction {
+    let event: DeviceButtonEventPayload
+    let deviceID: String
+    let bootID: String
+    let authenticationGeneration: Int
+    let statusReceivedAtUptime: TimeInterval
+    let eventAgeMs: Double
+    let expectedFrameSequence: Int?
+}
+
 @MainActor
 final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSynthesizerDelegate {
     @Published var detectionEnabled = false
@@ -60,15 +70,32 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     @Published private(set) var isDeviceAsking = false
     @Published private(set) var isRefreshingDevice = false
     @Published private(set) var deviceFreshnessRevision = 0
+    @Published private(set) var deviceButtonMessage: String?
+    @Published private(set) var deviceCaptureError: String?
+    @Published private(set) var deviceCapturedFrameData: Data?
+    @Published private(set) var deviceCapturedFrameSequence: Int?
+    @Published private(set) var deviceCapturedFramePressId: Int?
+    @Published private(set) var deviceAnswerButtonPressId: Int?
+    @Published private(set) var isCapturingDeviceFrame = false
 
     private var deviceStatusReceivedAtUptime: TimeInterval?
     private var lastDeviceCameraReady: Bool?
+    private var handledDeviceButtonEventKeys: Set<String>
+    private var handledDeviceButtonEventOrder: [String]
+    private static let handledDeviceButtonEventsDefaultsKey = "roSight.handledDeviceButtonEvents.v1"
+    private static let maximumHandledDeviceButtonEvents = 512
     private static let deviceFrameFreshnessMs = 350.0
     private static let maximumDeviceFrameBytes = 2 * 1024 * 1024
     private static let phoneFrameFreshnessSeconds = 2.5
     private static let phoneDetectionFreshnessSeconds = 2.5
 
     override init() {
+        let savedButtonEvents = Array(
+            (UserDefaults.standard.stringArray(forKey: Self.handledDeviceButtonEventsDefaultsKey) ?? [])
+                .suffix(Self.maximumHandledDeviceButtonEvents)
+        )
+        handledDeviceButtonEventOrder = savedButtonEvents
+        handledDeviceButtonEventKeys = Set(savedButtonEvents)
         super.init()
         speechSynthesizer.delegate = self
     }
@@ -121,6 +148,13 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             deviceAskError = nil
             deviceAnswer = ""
             deviceAnswerFrameSequence = nil
+            deviceAnswerButtonPressId = nil
+            deviceButtonMessage = nil
+            deviceCaptureError = nil
+            deviceCapturedFrameData = nil
+            deviceCapturedFrameSequence = nil
+            deviceCapturedFramePressId = nil
+            isCapturingDeviceFrame = false
             phoneAskGeneration += 1
             deviceAskGeneration += 1
             isAsking = false
@@ -315,6 +349,10 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         deviceStatusSnapshot?.resolvedOperationEnabled
     }
 
+    var deviceAnswerButtonSourceLabel: String {
+        deviceAnswerButtonPressId.map { " · NÚT #\($0)" } ?? ""
+    }
+
     private var deviceStatusElapsedMs: Double? {
         guard let receivedAt = deviceStatusReceivedAtUptime else { return nil }
         return max(0, (ProcessInfo.processInfo.systemUptime - receivedAt) * 1000)
@@ -333,7 +371,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
               connection.deviceConnected == true,
               let status = connection.status,
               status.source == "device",
-              status.resolvedOperationEnabled == true,
+              deviceOperationEnabled == true,
               status.cameraInputState == "live",
               let age = effectiveDeviceAgeMs(status.cameraAgeMs),
               age <= Self.deviceFrameFreshnessMs,
@@ -383,7 +421,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         guard let status = connection.status else {
             return "Backend chưa trả trạng thái camera ESP32."
         }
-        if status.resolvedOperationEnabled == false {
+        if deviceOperationEnabled == false {
             let health = status.deviceHealth
             if health?.modeButtonConfigured == false || health?.buttonInputsConfigured == false {
                 let profile = health?.pinProfile
@@ -402,7 +440,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             }
             return "ESP32 đang tạm dừng. Chưa xác nhận GPIO nút MODE và app không có lệnh bật từ xa; status/mạng vẫn dùng được."
         }
-        guard status.resolvedOperationEnabled == true else {
+        guard deviceOperationEnabled == true else {
             return "Đang chờ ESP32 xác nhận trạng thái hoạt động."
         }
         guard status.cameraInputState == "live" else {
@@ -418,6 +456,189 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         return "ESP32 đang hoạt động · JPEG \(deviceFrameSequence ?? 0)."
     }
 
+    private func acceptDeviceButtonEvent(
+        from connection: DeviceConnectionPayload,
+        sessionGeneration: Int
+    ) -> PendingDeviceButtonAction? {
+        guard sessionGeneration == authenticationGeneration,
+              connection.deviceConnected == true,
+              let status = connection.status,
+              status.source == "device",
+              let health = status.deviceHealth,
+              let deviceID = health.deviceId, !deviceID.isEmpty,
+              let bootID = health.bootId, !bootID.isEmpty,
+              let event = status.buttonEvent,
+              event.type == "button_event",
+              event.deviceId == deviceID,
+              event.bootId == bootID,
+              event.action == "pressed",
+              let buttonID = event.buttonId,
+              ["mode", "capture_image", "ask_llm"].contains(buttonID),
+              let pressID = event.pressId,
+              pressID > 0, pressID <= Int(UInt32.max),
+              let pressedAt = event.pressedAtMs, pressedAt >= 0,
+              let eventTime = event.tMs, eventTime >= 0,
+              let operationEnabled = event.operationEnabled,
+              let eventAge = status.buttonEventAgeMs,
+              (0...10_000).contains(eventAge),
+              let receivedAt = deviceStatusReceivedAtUptime else {
+            return nil
+        }
+
+        let eventKey = "\(bootID.utf8.count):\(bootID):\(pressID)"
+        guard handledDeviceButtonEventKeys.insert(eventKey).inserted else { return nil }
+        handledDeviceButtonEventOrder.append(eventKey)
+        if handledDeviceButtonEventOrder.count > Self.maximumHandledDeviceButtonEvents {
+            let expiredCount = handledDeviceButtonEventOrder.count - Self.maximumHandledDeviceButtonEvents
+            handledDeviceButtonEventOrder.removeFirst(expiredCount)
+            handledDeviceButtonEventKeys = Set(handledDeviceButtonEventOrder)
+        }
+        UserDefaults.standard.set(handledDeviceButtonEventOrder, forKey: Self.handledDeviceButtonEventsDefaultsKey)
+        deviceCaptureError = nil
+        deviceAskError = nil
+
+        if buttonID == "mode" {
+            deviceButtonMessage = operationEnabled
+                ? "Nút MODE: ESP32 đã bật."
+                : "Nút MODE: ESP32 đang tạm dừng."
+            if !operationEnabled {
+                cancelDeviceAsk()
+                clearDevicePreview()
+            }
+            return nil
+        }
+
+        guard operationEnabled, status.resolvedOperationEnabled == true else {
+            deviceButtonMessage = "ESP32 đang tạm dừng; thao tác từ nút chưa được chạy."
+            if buttonID == "capture_image" {
+                deviceCaptureError = deviceButtonMessage
+            } else {
+                deviceAskError = deviceButtonMessage
+            }
+            return nil
+        }
+
+        deviceButtonMessage = buttonID == "capture_image"
+            ? "Nút chụp đã được nhận; đang lấy JPEG mới."
+            : "Nút hỏi AI đã được nhận; đang kiểm tra ảnh và ToF."
+        return PendingDeviceButtonAction(
+            event: event,
+            deviceID: deviceID,
+            bootID: bootID,
+            authenticationGeneration: sessionGeneration,
+            statusReceivedAtUptime: receivedAt,
+            eventAgeMs: Double(eventAge),
+            expectedFrameSequence: status.cameraFrame
+        )
+    }
+
+    private func currentDeviceSessionMatches(_ action: PendingDeviceButtonAction) -> Bool {
+        guard action.authenticationGeneration == authenticationGeneration,
+              let connection = deviceConnection,
+              connection.deviceConnected == true,
+              let health = connection.status?.deviceHealth else {
+            return false
+        }
+        return health.deviceId == action.deviceID && health.bootId == action.bootID
+    }
+
+    private func isCurrentDeviceButtonAction(_ action: PendingDeviceButtonAction) -> Bool {
+        let elapsedMs = max(0, (ProcessInfo.processInfo.systemUptime - action.statusReceivedAtUptime) * 1000)
+        guard action.authenticationGeneration == authenticationGeneration,
+              action.eventAgeMs + elapsedMs <= 10_000,
+              action.event.operationEnabled == true,
+              deviceOperationEnabled == true,
+              currentDeviceSessionMatches(action) else {
+            return false
+        }
+        return true
+    }
+
+    private func freshDeviceButtonAskContextError(for action: PendingDeviceButtonAction) -> String? {
+        guard isCurrentDeviceButtonAction(action) else {
+            return "Nút đã hết hạn hoặc ESP32 đã đổi phiên; Vision chưa được gọi."
+        }
+        guard deviceCameraReady else {
+            return "Frame ESP32 đã cũ hoặc chưa sẵn sàng; Vision chưa được gọi."
+        }
+        guard let connection = deviceConnection,
+              let status = connection.status else {
+            return "Chưa có trạng thái ESP32 mới để kiểm tra ToF."
+        }
+
+        let validToFZone = status.zones?.contains { zone in
+            zone.tofValid
+                && zone.nearestCm.map { $0.isFinite && $0 > 0 && $0 <= 100_000 } == true
+        } ?? false
+        let tofRequired = status.tofOk == true || status.deviceHealth?.tofOk == true
+        let tofReported = tofRequired || status.tofMode == "device" || validToFZone
+        guard tofReported else { return nil }
+
+        guard connection.transport == "firmware_wifi" else {
+            return tofRequired
+                ? "Bridge chưa cung cấp ToF còn hạn; Vision chưa được gọi."
+                : nil
+        }
+        guard status.tofMode == "device",
+              status.tofBootId == action.bootID,
+              let age = effectiveDeviceAgeMs(status.tofAgeMs),
+              age <= Self.deviceFrameFreshnessMs else {
+            return "Số đo ToF đã cũ hoặc không cùng phiên ESP32; Vision chưa được gọi."
+        }
+        if tofRequired && !validToFZone {
+            return "ToF đã được bật nhưng chưa có số đo hợp lệ mới; Vision chưa được gọi."
+        }
+        if status.tofMode == "device" && !validToFZone {
+            return "Không có vùng ToF hợp lệ mới; Vision chưa được gọi."
+        }
+        return nil
+    }
+
+    private func captureDeviceButtonFrame(_ action: PendingDeviceButtonAction) async {
+        guard isCurrentDeviceButtonAction(action),
+              deviceCameraReady,
+              let expectedSequence = action.expectedFrameSequence,
+              expectedSequence > 0 else {
+            deviceCaptureError = "Frame ESP32 đã cũ hoặc nút không còn thuộc phiên hiện tại; chưa lưu JPEG."
+            deviceButtonMessage = "Không chụp được ảnh mới từ nút."
+            return
+        }
+
+        isCapturingDeviceFrame = true
+        deviceCaptureError = nil
+        defer { isCapturingDeviceFrame = false }
+        do {
+            try await fetchDeviceFrame(expectedSequence: expectedSequence)
+            guard action.authenticationGeneration == authenticationGeneration,
+                  let health = deviceConnection?.status?.deviceHealth,
+                  health.deviceId == action.deviceID,
+                  health.bootId == action.bootID,
+                  let data = deviceFrameData,
+                  let sequence = deviceFrameSequence else {
+                throw APIError.message("Phiên ESP32 đã đổi trước khi lưu ảnh.")
+            }
+            deviceCapturedFrameData = data
+            deviceCapturedFrameSequence = sequence
+            deviceCapturedFramePressId = action.event.pressId
+            deviceButtonMessage = "Đã lưu JPEG mới từ nút chụp · khung \(sequence)."
+        } catch {
+            if action.authenticationGeneration == authenticationGeneration {
+                deviceCaptureError = error.localizedDescription
+                deviceButtonMessage = "Không chụp được ảnh mới từ nút."
+            }
+        }
+    }
+
+    private func askVisionFromDeviceButton(_ action: PendingDeviceButtonAction) async {
+        let prompt = "Hãy mô tả ngắn gọn những gì nhìn thấy trước camera và nêu vật thể chính hoặc chướng ngại vật rõ ràng. Chỉ nêu khoảng cách khi có số đo ToF hợp lệ; không suy đoán lối đi an toàn."
+        await submitDeviceQuestion(
+            question: prompt,
+            trigger: "button_event",
+            sessionGeneration: action.authenticationGeneration,
+            buttonAction: action
+        )
+    }
+
     func refreshDeviceStatus() async {
         guard !isRefreshingDevice else { return }
         guard !backendBaseURL.isEmpty else {
@@ -429,6 +650,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         }
 
         let generation = authenticationGeneration
+        var buttonAction: PendingDeviceButtonAction?
         isRefreshingDevice = true
         defer { isRefreshingDevice = false }
 
@@ -441,6 +663,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             deviceStatusReceivedAtUptime = ProcessInfo.processInfo.systemUptime
             deviceConnection = connection
             deviceError = nil
+            buttonAction = acceptDeviceButtonEvent(from: connection, sessionGeneration: generation)
         } catch {
             guard !Task.isCancelled, generation == authenticationGeneration else { return }
             deviceStatusReceivedAtUptime = nil
@@ -450,16 +673,33 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             return
         }
 
+        let isCaptureButtonAction = buttonAction?.event.buttonId == "capture_image"
+        if isCaptureButtonAction, let buttonAction {
+            await captureDeviceButtonFrame(buttonAction)
+        }
+
         await refreshVisionCapabilitiesIfNeeded()
         guard !Task.isCancelled, generation == authenticationGeneration else { return }
         guard deviceCameraReady,
               let expectedSequence = deviceConnection?.status?.cameraFrame else {
             clearDevicePreview()
+            if buttonAction?.event.buttonId == "ask_llm" {
+                deviceAskError = "Frame ESP32 đã cũ hoặc chưa sẵn sàng; Vision chưa được gọi."
+                deviceButtonMessage = "Nút hỏi AI đã được xử lý nhưng frame chưa sẵn sàng."
+            }
+            return
+        }
+
+        if isCaptureButtonAction {
+            updateDeviceContext(for: deviceFrameSequence)
             return
         }
 
         if deviceFrameData != nil, deviceFrameMatchesCurrentStatus {
             updateDeviceContext(for: deviceFrameSequence)
+            if let buttonAction, buttonAction.event.buttonId == "ask_llm" {
+                Task { await self.askVisionFromDeviceButton(buttonAction) }
+            }
             return
         }
 
@@ -468,23 +708,53 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             try await fetchDeviceFrame(expectedSequence: expectedSequence)
             guard generation == authenticationGeneration else { return }
             deviceError = nil
+            if let buttonAction, buttonAction.event.buttonId == "ask_llm" {
+                Task { await self.askVisionFromDeviceButton(buttonAction) }
+            }
         } catch {
             guard !Task.isCancelled else { return }
             clearDevicePreview()
             deviceError = error.localizedDescription
+            if buttonAction?.event.buttonId == "ask_llm" {
+                deviceAskError = "Chưa có JPEG mới khớp frame ESP32; Vision chưa được gọi."
+                deviceButtonMessage = "Nút hỏi AI đã được xử lý nhưng JPEG chưa sẵn sàng."
+            }
         }
     }
 
     func askAboutDevice(question: String) async {
+        await submitDeviceQuestion(
+            question: question,
+            trigger: "manual",
+            sessionGeneration: authenticationGeneration,
+            buttonAction: nil
+        )
+    }
+
+    private func submitDeviceQuestion(
+        question: String,
+        trigger: String,
+        sessionGeneration: Int,
+        buttonAction: PendingDeviceButtonAction?
+    ) async {
+        guard sessionGeneration == authenticationGeneration else { return }
         let cleanedQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanedQuestion.isEmpty else {
             deviceAskError = "Nhập câu hỏi về camera ESP32 trước."
             return
         }
+        if let buttonAction,
+           let contextError = freshDeviceButtonAskContextError(for: buttonAction) {
+            deviceAskError = contextError
+            deviceButtonMessage = "Nút hỏi AI đã được xử lý; dữ liệu thiết bị chưa đủ mới."
+            return
+        }
+        guard deviceVisionReady == true else {
+            deviceAskError = "Vision chưa sẵn sàng trên máy chủ."
+            return
+        }
         guard deviceCanAsk else {
-            deviceAskError = deviceVisionReady == false
-                ? "Vision chưa sẵn sàng trên máy chủ."
-                : "Chỉ có thể hỏi khi ESP32 đang hoạt động và có JPEG mới."
+            deviceAskError = "Chỉ có thể hỏi khi ESP32 đang hoạt động và có JPEG mới."
             return
         }
 
@@ -496,6 +766,10 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         deviceAskError = nil
         deviceAnswer = ""
         deviceAnswerFrameSequence = nil
+        deviceAnswerButtonPressId = buttonAction?.event.pressId
+        if buttonAction != nil {
+            deviceButtonMessage = "Đã gửi một yêu cầu Vision cho nút hỏi AI."
+        }
         defer { if askGeneration == deviceAskGeneration { isDeviceAsking = false } }
 
         do {
@@ -503,11 +777,12 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
                 endpoint: "device/ask",
                 method: "POST",
                 timeoutInterval: 210,
-                jsonBody: ["question": cleanedQuestion, "trigger": "manual"]
+                jsonBody: ["question": cleanedQuestion, "trigger": trigger]
             )
             let (data, response) = try await performAuthenticatedRequest(request)
             guard generation == authenticationGeneration,
                   askGeneration == deviceAskGeneration,
+                  buttonAction.map({ currentDeviceSessionMatches($0) }) ?? true,
                   !Task.isCancelled else { return }
             let payload = try Self.decode(DeviceAskPayload.self, data: data, response: response)
             guard let answer = payload.answer, !answer.isEmpty, payload.visionUsed == true else {
@@ -515,9 +790,16 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             }
             deviceAnswer = answer
             deviceAnswerFrameSequence = payload.frameSeq
+            if buttonAction != nil {
+                deviceButtonMessage = "Đã nhận câu trả lời cho nút hỏi AI."
+            }
         } catch {
-            if askGeneration == deviceAskGeneration, !Task.isCancelled {
+            if generation == authenticationGeneration,
+               askGeneration == deviceAskGeneration, !Task.isCancelled {
                 deviceAskError = error.localizedDescription
+                if buttonAction != nil {
+                    deviceButtonMessage = "Yêu cầu Vision cho nút hỏi AI đã kết thúc."
+                }
             }
         }
     }

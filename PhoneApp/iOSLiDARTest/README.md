@@ -46,6 +46,21 @@ the displayed image. ToF is shown only when the backend marks the reading as
 device-originated and fresh; zones are separate sensor readings and are not
 assigned to objects in the JPEG.
 
+The app also handles a fresh firmware `button_event` from this status response.
+It verifies `button_id`, `action`, `press_id`, event age, device ID, and boot ID,
+then deduplicates by `(boot_id, press_id)` across launches on this installation.
+The event's operation state is used only when its device-clock `t_ms` is newer
+than the matching health snapshot. `mode` updates the shown operation state.
+`capture_image` fetches one new JPEG through the backend, validates its bytes
+and frame sequence, and keeps/displays it in the app session; it never calls
+Vision. `ask_llm` submits one `trigger: "button_event"` request only while the
+same login generation and ESP32 boot remain active, the frame is fresh, Vision
+is ready, and configured ToF data is still valid and within 350 ms. If ToF is
+reported unavailable, the prompt does not claim a distance. The backend checks
+device operation, frame, and required ToF freshness again before using Vision.
+The app consumes an event once even when a freshness or Vision check fails; it
+does not retry that physical press.
+
 When the user asks a question, the app sends JSON to
 `POST /api/device/ask` with `question` and `trigger: "manual"`; it does not send
 the preview JPEG as the Vision input. Flask obtains a current ESP32 image and
