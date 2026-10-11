@@ -92,16 +92,12 @@ untrusted network.
 
 ## Build and install
 
-The repository workflow at `.github/workflows/ios-lidar-test.yml` is a manual
-`workflow_dispatch` job on macOS. It generates the Xcode project with XcodeGen,
-builds an unsigned iOS app, and packages an IPA artifact. It does not sign the
-app. This source is on local branch `codex/ios-lidar-test-2026-10-11` in the
-configured repository `bartsil/Mini-AI-Camera-Module`, with commits
-`59a064c`, `295771c`, `0a29d78`, and `4149b17`; the current local branch also
-includes iPhone speech playback. A push was attempted and GitHub
-returned HTTP 403
-because account `npgb2505` has READ-only access. The branch has not been pushed,
-and no hosted build or workflow run was started for this work.
+The repository workflow at `.github/workflows/ios-lidar-test.yml` runs on pushes
+that change the native app or workflow, and also supports manual runs from
+GitHub Actions once the workflow file is present on the repository's default
+branch. It generates the Xcode project with XcodeGen, builds an unsigned iOS
+app, and packages an IPA artifact retained for three days. It does not sign the
+app.
 
 The current development host is Windows and has neither `xcodebuild` nor the
 Swift toolchain, so the current native source changes, including speech

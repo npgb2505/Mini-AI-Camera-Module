@@ -1,6 +1,10 @@
 name: Build iOS test IPA
 
 on:
+  push:
+    paths:
+      - 'PhoneApp/iOSLiDARTest/**'
+      - '.github/workflows/ios-lidar-test.yml'
   workflow_dispatch:
 
 permissions:
