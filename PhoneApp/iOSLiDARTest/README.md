@@ -32,8 +32,10 @@ these optional status fields; the app decodes them as unknown.
 The native app reads `GET /api/device/status`. It treats the device as ready
 only when the backend reports `source=device`, `device_connected=true`,
 `operation_enabled=true`, a live camera, a positive frame sequence, and a
-camera age of at most 350 ms. Standby, unknown operation state, a stale frame,
-or a disconnected device disables asking and hides the old preview.
+camera age of at most 350 ms. The app continues aging the received status while
+it polls, so a delayed status response cannot keep an old preview, detection,
+or ToF reading marked as fresh. Standby, unknown operation state, a stale
+frame, or a disconnected device disables asking and hides the old preview.
 
 For preview, the app requests `GET /api/device/frame?frame_seq=…`, verifies the
 JPEG bytes and `X-Frame-Seq`, and matches the returned sequence to the status

@@ -630,6 +630,16 @@ struct CameraScreen: View {
                 }
             }
         }
+        .task {
+            while !Task.isCancelled {
+                model.refreshDeviceFreshness()
+                do {
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                } catch {
+                    break
+                }
+            }
+        }
         .onDisappear {
             model.clearDevicePreview()
         }

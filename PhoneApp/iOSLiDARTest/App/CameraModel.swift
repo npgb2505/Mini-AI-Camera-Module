@@ -59,7 +59,10 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     @Published private(set) var deviceAskError: String?
     @Published private(set) var isDeviceAsking = false
     @Published private(set) var isRefreshingDevice = false
+    @Published private(set) var deviceFreshnessRevision = 0
 
+    private var deviceStatusReceivedAtUptime: TimeInterval?
+    private var lastDeviceCameraReady: Bool?
     private static let deviceFrameFreshnessMs = 350.0
     private static let maximumDeviceFrameBytes = 2 * 1024 * 1024
     private static let phoneFrameFreshnessSeconds = 2.5
@@ -110,6 +113,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             authenticationError = nil
             authenticationRetryAfter = .distantPast
             lastVisionStatusCheck = nil
+            deviceStatusReceivedAtUptime = nil
             deviceVisionReady = nil
             deviceVisionProvider = nil
             deviceConnection = nil
@@ -272,6 +276,32 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         deviceZones = []
     }
 
+    func refreshDeviceFreshness() {
+        let cameraReady = deviceCameraReady
+        if lastDeviceCameraReady != cameraReady {
+            lastDeviceCameraReady = cameraReady
+            deviceFreshnessRevision &+= 1
+        }
+        guard deviceConnection != nil else { return }
+        guard cameraReady,
+              deviceFrameData != nil,
+              deviceFrameMatchesCurrentStatus else {
+            if deviceFrameData != nil || deviceFrameSequence != nil
+                || !deviceDetections.isEmpty || !deviceZones.isEmpty {
+                clearDevicePreview()
+            }
+            return
+        }
+
+        guard let status = deviceStatusSnapshot else { return }
+        let detectionsFresh = effectiveDeviceAgeMs(status.resolvedDetectionsAgeMs)
+            .map { $0 <= Self.deviceFrameFreshnessMs } ?? false
+        if !detectionsFresh, !deviceDetections.isEmpty { deviceDetections = [] }
+        let tofFresh = effectiveDeviceAgeMs(status.tofAgeMs)
+            .map { $0 <= Self.deviceFrameFreshnessMs } ?? false
+        if !tofFresh, !deviceZones.isEmpty { deviceZones = [] }
+    }
+
     func cancelDeviceAsk() {
         deviceAskGeneration += 1
         isDeviceAsking = false
@@ -285,6 +315,19 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         deviceStatusSnapshot?.resolvedOperationEnabled
     }
 
+    private var deviceStatusElapsedMs: Double? {
+        guard let receivedAt = deviceStatusReceivedAtUptime else { return nil }
+        return max(0, (ProcessInfo.processInfo.systemUptime - receivedAt) * 1000)
+    }
+
+    private func effectiveDeviceAgeMs(_ reportedAgeMs: Double?) -> Double? {
+        guard let reportedAgeMs, reportedAgeMs.isFinite, reportedAgeMs >= 0,
+              let elapsedMs = deviceStatusElapsedMs else {
+            return nil
+        }
+        return reportedAgeMs + elapsedMs
+    }
+
     var deviceCameraReady: Bool {
         guard let connection = deviceConnection,
               connection.deviceConnected == true,
@@ -292,9 +335,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
               status.source == "device",
               status.resolvedOperationEnabled == true,
               status.cameraInputState == "live",
-              let age = status.cameraAgeMs,
-              age.isFinite,
-              age >= 0,
+              let age = effectiveDeviceAgeMs(status.cameraAgeMs),
               age <= Self.deviceFrameFreshnessMs,
               let sequence = status.cameraFrame,
               sequence > 0 else {
@@ -367,7 +408,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         guard status.cameraInputState == "live" else {
             return status.cameraError ?? "Camera ESP32 chưa sẵn sàng."
         }
-        guard let age = status.cameraAgeMs, age.isFinite, age >= 0,
+        guard let age = effectiveDeviceAgeMs(status.cameraAgeMs),
               age <= Self.deviceFrameFreshnessMs else {
             return "Đang chờ một khung hình ESP32 mới, còn hạn."
         }
@@ -381,6 +422,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         guard !isRefreshingDevice else { return }
         guard !backendBaseURL.isEmpty else {
             deviceError = "Nhập địa chỉ Flask trong cài đặt trước."
+            deviceStatusReceivedAtUptime = nil
             deviceConnection = nil
             clearDevicePreview()
             return
@@ -396,10 +438,12 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             guard generation == authenticationGeneration else { return }
             let connection = try Self.decode(DeviceConnectionPayload.self, data: data, response: response)
             guard !Task.isCancelled else { return }
+            deviceStatusReceivedAtUptime = ProcessInfo.processInfo.systemUptime
             deviceConnection = connection
             deviceError = nil
         } catch {
             guard !Task.isCancelled, generation == authenticationGeneration else { return }
+            deviceStatusReceivedAtUptime = nil
             deviceConnection = nil
             deviceError = error.localizedDescription
             clearDevicePreview()
@@ -725,8 +769,8 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             deviceZones = []
             return
         }
-        let detectionsFresh = status.resolvedDetectionsAgeMs.map {
-            $0.isFinite && $0 >= 0 && $0 <= Self.deviceFrameFreshnessMs
+        let detectionsFresh = effectiveDeviceAgeMs(status.resolvedDetectionsAgeMs).map {
+            $0 <= Self.deviceFrameFreshnessMs
         } ?? false
         let detectionsBootMatches = deviceConnection?.transport != "firmware_wifi"
             || status.detectionsBootId == status.deviceHealth?.bootId
@@ -737,8 +781,8 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             deviceDetections = []
         }
 
-        let tofFresh = status.tofAgeMs.map {
-            $0.isFinite && $0 >= 0 && $0 <= Self.deviceFrameFreshnessMs
+        let tofFresh = effectiveDeviceAgeMs(status.tofAgeMs).map {
+            $0 <= Self.deviceFrameFreshnessMs
         } ?? false
         let tofBootMatches = deviceConnection?.transport != "firmware_wifi"
             || status.tofBootId == status.deviceHealth?.bootId
