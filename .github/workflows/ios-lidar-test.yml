@@ -36,6 +36,43 @@ jobs:
             -o .build/depth-checks/depth-snapshot-checks
           .build/depth-checks/depth-snapshot-checks
 
+      - name: Launch iPhone Simulator smoke
+        run: |
+          SIMULATOR_INFO="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); x=next((v for group in d["devices"].values() for v in group if v.get("name")=="iPhone 16" and v.get("isAvailable")),None); print("{} {}".format(x["udid"],x["state"]) if x else "")')"
+          if [ -z "$SIMULATOR_INFO" ]; then
+            echo "iPhone 16 simulator is unavailable on this runner."
+            exit 1
+          fi
+          SIMULATOR_ID="${SIMULATOR_INFO%% *}"
+          SIMULATOR_STATE="${SIMULATOR_INFO#* }"
+          echo "Using iPhone 16 simulator $SIMULATOR_ID ($SIMULATOR_STATE)."
+          xcodebuild \
+            -project RoSight.xcodeproj \
+            -scheme RoSight \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -derivedDataPath .build-simulator \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='-'
+          if [ "$SIMULATOR_STATE" != "Booted" ]; then
+            xcrun simctl boot "$SIMULATOR_ID"
+          fi
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          xcrun simctl install "$SIMULATOR_ID" .build-simulator/Build/Products/Debug-iphonesimulator/RoSight.app
+          xcrun simctl launch "$SIMULATOR_ID" vn.khiemthi.rosight
+          mkdir -p .build-simulator/smoke
+          xcrun simctl io "$SIMULATOR_ID" screenshot .build-simulator/smoke/launch.png
+
+      - name: Save simulator smoke screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RoSight-simulator-smoke
+          path: PhoneApp/iOSLiDARTest/.build-simulator/smoke/launch.png
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Build unsigned iPhone app
         run: |
           xcodebuild \
