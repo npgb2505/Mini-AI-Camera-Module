@@ -26,7 +26,7 @@ private struct PendingBLEButtonEvent {
 }
 
 @MainActor
-final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSynthesizerDelegate {
+final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     @Published var detectionEnabled = false
     @Published var isDetecting = false
     @Published var isAsking = false

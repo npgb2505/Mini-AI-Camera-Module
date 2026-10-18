@@ -34,6 +34,7 @@ struct LiDARCameraPreview: UIViewRepresentable {
                 ? [.sceneDepth, .smoothedSceneDepth]
                 : [.sceneDepth]
         }
+        context.coordinator.setSessionConfiguration(configuration)
         view.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
         model.updateCameraStatus(sceneDepthSupported
             ? "Đang chờ camera và ARKit sceneDepth…"
@@ -58,6 +59,7 @@ struct LiDARCameraPreview: UIViewRepresentable {
         private var lastFrameUpdate = 0.0
         private var didReceiveSceneDepth = false
         private var didReportMissingSceneDepth = false
+        private var sessionConfiguration: ARWorldTrackingConfiguration?
         private let imageContext = CIContext()
 
         init(model: CameraModel) {
@@ -68,6 +70,10 @@ struct LiDARCameraPreview: UIViewRepresentable {
             stateLock.lock()
             detectionEnabled = enabled
             stateLock.unlock()
+        }
+
+        func setSessionConfiguration(_ configuration: ARWorldTrackingConfiguration) {
+            sessionConfiguration = configuration
         }
 
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
@@ -120,7 +126,27 @@ struct LiDARCameraPreview: UIViewRepresentable {
 
         func session(_ session: ARSession, didFailWithError error: Error) {
             Task { @MainActor [weak model] in
-                model?.updateCameraStatus("ARKit không mở được camera hoặc LiDAR. Kiểm tra quyền camera rồi mở lại chế độ iPhone.")
+                model?.updateCenterDistance(nil)
+                model?.updateCameraStatus("Không mở được camera. Kiểm tra quyền Camera trong Cài đặt iPhone, rồi rời chế độ iPhone và mở lại.")
+            }
+        }
+
+        func sessionWasInterrupted(_ session: ARSession) {
+            Task { @MainActor [weak model] in
+                model?.updateCenterDistance(nil)
+                model?.updateCameraStatus("Camera tạm dừng. Giữ iPhone hướng về cảnh; app sẽ nối lại khi camera sẵn sàng.")
+            }
+        }
+
+        func sessionInterruptionEnded(_ session: ARSession) {
+            didReceiveSceneDepth = false
+            didReportMissingSceneDepth = false
+            if let sessionConfiguration {
+                session.run(sessionConfiguration, options: [.resetTracking, .removeExistingAnchors])
+            }
+            Task { @MainActor [weak model] in
+                model?.updateCenterDistance(nil)
+                model?.updateCameraStatus("Camera đã hoạt động lại; đang chờ frame và sceneDepth mới.")
             }
         }
 
