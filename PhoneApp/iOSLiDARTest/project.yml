@@ -35,3 +35,13 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: "YES"
         CODE_SIGNING_ALLOWED: "NO"
+    scheme:
+      testTargets:
+        - RoSightUITests
+  RoSightUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: RoSight

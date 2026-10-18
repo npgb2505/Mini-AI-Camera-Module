@@ -104,7 +104,8 @@ struct CameraScreen: View {
                     title: "Kết nối ESP32",
                     subtitle: "Xem JPEG, trạng thái hoạt động và ToF từ thiết bị; hỏi Vision về frame mới.",
                     symbol: "cpu",
-                    tint: .orange
+                    tint: .orange,
+                    identifier: "mode.device"
                 ) {
                     selectMode(.device)
                 }
@@ -113,7 +114,8 @@ struct CameraScreen: View {
                     title: "Chỉ dùng iPhone",
                     subtitle: "Camera sau và ARKit sceneDepth khi iPhone hỗ trợ; không cần ESP32.",
                     symbol: "iphone.gen3",
-                    tint: .mint
+                    tint: .mint,
+                    identifier: "mode.phone"
                 ) {
                     selectMode(.phone)
                 }
@@ -133,6 +135,7 @@ struct CameraScreen: View {
         subtitle: String,
         symbol: String,
         tint: Color,
+        identifier: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -165,6 +168,7 @@ struct CameraScreen: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint(subtitle)
+        .accessibilityIdentifier(identifier)
     }
 
     private var phoneModeContent: some View {
@@ -312,6 +316,7 @@ struct CameraScreen: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Khoảng cách LiDAR tại tâm khung hình")
+        .accessibilityIdentifier("phone.distance.readout")
         .accessibilityValue(model.centerDistance.map { String(format: "%.2f mét", $0) } ?? "Chưa có số đo mới")
         .accessibilityHint("Số đo sceneDepth là ước tính; app không dùng số đo này để khẳng định lối đi an toàn.")
         .padding(.horizontal, 20)

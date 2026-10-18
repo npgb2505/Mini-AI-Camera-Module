@@ -45,6 +45,7 @@ jobs:
           fi
           SIMULATOR_ID="${SIMULATOR_INFO%% *}"
           SIMULATOR_STATE="${SIMULATOR_INFO#* }"
+          echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
           echo "Using iPhone 16 simulator $SIMULATOR_ID ($SIMULATOR_STATE)."
           xcodebuild \
             -project RoSight.xcodeproj \
@@ -72,6 +73,20 @@ jobs:
           path: PhoneApp/iOSLiDARTest/.build-simulator/smoke/launch.png
           if-no-files-found: ignore
           retention-days: 3
+
+      - name: Exercise iPhone mode UI
+        run: |
+          xcrun simctl privacy "$SIMULATOR_ID" grant camera vn.khiemthi.rosight
+          xcodebuild \
+            -project RoSight.xcodeproj \
+            -scheme RoSight \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -derivedDataPath .build-simulator \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='-' \
+            test
 
       - name: Build unsigned iPhone app
         run: |
