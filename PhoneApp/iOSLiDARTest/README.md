@@ -249,20 +249,23 @@ untrusted network.
 ## Build and install
 
 The workflow definition at `.github/workflows/ios-lidar-test.yml` runs on pushes
-that change the native app or workflow. Manual runs become available after the
-workflow file is present on the repository's default branch. It generates the
-Xcode project with XcodeGen, builds an unsigned iOS app, and packages an IPA
-artifact retained for three days. It does not sign the app.
+that change the native app or workflow. It generates the Xcode project with
+XcodeGen, runs nine LiDAR-depth checks, builds and launches the app in an iPhone
+16 Simulator, saves a launch screenshot, and packages an unsigned device IPA
+retained for three days. It does not sign the app.
 
 The original repository is read-only for the connected account, so the app-only
 branch was pushed to the public fork
 [`npgb2505/Mini-AI-Camera-Module`](https://github.com/npgb2505/Mini-AI-Camera-Module)
 as `codex/ios-lidar-test-2026-10-11`. No KiCad files were included. GitHub
-Actions run [39087918103](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39087918103)
-succeeded on Xcode 16.4, passed seven LiDAR depth-sampling checks, and created
-`RoSight-unsigned-ipa`. A copy is saved in the project workspace at
-`04_App/ios_builds/2026-10-18-run-39087918103/`. The IPA is arm64, targets iOS
-16.0+, and is unsigned; AltServer on Windows must sign it before installation.
+Actions run [39088799047](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39088799047)
+succeeded on Xcode 16.4, passed nine depth checks, launched the app in the
+simulator, built the device app, and created `RoSight-unsigned-ipa`. The IPA is
+saved at `04_App/ios_builds/2026-10-18-run-39088799047/RoSight-unsigned.ipa`;
+the simulator launch image is at
+`04_App/ios_builds/2026-10-18-run-39088799047-simulator/launch.png`. The IPA is
+arm64, targets iOS 16.0+, and is unsigned; AltServer on Windows must sign it
+before installation.
 Standard hosted runners are free for public repositories; private repositories
 use the account's included quota. See the no-Mac [installation guide](INSTALL_VI.md).
 
@@ -279,10 +282,12 @@ sideload guide](INSTALL_VI.md).
 
 ## Verification limits
 
-Source review can confirm the app's request paths, JSON fields, frame-sequence
-checks, and ARKit coordinate transform. It cannot confirm camera permissions,
-LiDAR alignment, device standby behavior, JPEG cadence, speech playback/routing,
-or Vision latency on physical hardware. The proximity threshold and speech
-behavior also have not been calibrated or checked on an iPhone. This native app
-has not been run on an iPhone or ESP32 as part of the current local changes. Do
-not treat source review or an unsigned IPA build as a real-device test.
+Source review and CI confirm the app's request paths, JSON fields,
+frame-sequence checks, pixel-to-normalized YOLO box conversion, synthetic
+depth-buffer handling, and simulator launch. The simulator has no iPhone 12 Pro
+LiDAR; it cannot confirm camera permissions, physical LiDAR alignment or
+accuracy, device standby behavior, JPEG cadence, speech playback/routing, or
+Vision latency on hardware. The proximity threshold and speech behavior also
+have not been calibrated on an iPhone. The app has not been installed on a
+physical iPhone or connected ESP32. Do not treat simulator launch or an unsigned
+IPA build as a real-device test.
