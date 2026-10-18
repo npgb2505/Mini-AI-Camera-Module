@@ -26,6 +26,14 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml
 
+      - name: Check LiDAR depth sampling math
+        run: |
+          mkdir -p .build/depth-checks
+          swiftc -parse-as-library -framework CoreVideo \
+            App/DepthSnapshot.swift Tests/DepthSnapshotChecks.swift \
+            -o .build/depth-checks/depth-snapshot-checks
+          .build/depth-checks/depth-snapshot-checks
+
       - name: Build unsigned iPhone app
         run: |
           xcodebuild \

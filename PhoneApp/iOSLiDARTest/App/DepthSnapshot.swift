@@ -67,7 +67,12 @@ struct DepthSnapshot: Sendable {
     }
 
     private func sample(x: Double, y: Double) -> Double? {
-        guard width > 0, height > 0, values.count == width * height else { return nil }
+        guard width > 0,
+              height > 0,
+              values.count == width * height,
+              confidence.isEmpty || confidence.count == values.count else {
+            return nil
+        }
         let normalizedX = min(1, max(0, x))
         let normalizedY = min(1, max(0, y))
 
