@@ -1363,24 +1363,17 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         defer { if modeGeneration == phoneModeGeneration { isDetecting = false } }
         status = "Đang gửi frame iPhone tới YOLO server trên Flask…"
         do {
-            let (data, response) = try await sendImage(endpoint: "detect", image: jpeg)
+            let (data, response) = try await sendImage(endpoint: "detect", image: jpeg, timeoutInterval: 12)
             guard phoneModeActive,
                   modeGeneration == phoneModeGeneration,
                   detectionEnabled,
                   detectionGeneration == phoneDetectionGeneration else { return }
             let payload = try Self.decode(YOLOPayload.self, data: data, response: response)
-            let imageWidth = payload.image?.width ?? 0
-            let imageHeight = payload.image?.height ?? 0
-            let imageSizeAvailable = imageWidth > 0 && imageHeight > 0
             detections = payload.detections.prefix(12).map { item in
                 FusedDetection(
                     label: item.label,
                     confidence: item.confidence,
-                    distanceMeters: depth?.distance(
-                        pixelBox: item.box,
-                        imageWidth: imageWidth,
-                        imageHeight: imageHeight
-                    )
+                    distanceMeters: depth?.distance(normalizedBox: item.box)
                 )
             }
             phoneDetectionsCapturedAt = capturedAt
@@ -1390,10 +1383,8 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             let depthStatus: String
             if depth == nil {
                 depthStatus = "sceneDepth chưa có ở khung này."
-            } else if imageSizeAvailable {
-                depthStatus = "khoảng cách sceneDepth là ước tính."
             } else {
-                depthStatus = "không ghép LiDAR: YOLO chưa trả kích thước ảnh."
+                depthStatus = "khoảng cách sceneDepth là ước tính."
             }
             status = "YOLO server: \(detections.count) vật thể\(timing) · \(depthStatus)"
         } catch {
@@ -1770,19 +1761,13 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
 private struct YOLOPayload: Decodable {
     let detections: [YOLODetection]
-    let image: YOLOImageSize?
     let inferenceMs: Double?
     let error: String?
 
     enum CodingKeys: String, CodingKey {
-        case detections, image, error
+        case detections, error
         case inferenceMs = "inference_ms"
     }
-}
-
-private struct YOLOImageSize: Decodable {
-    let width: Int
-    let height: Int
 }
 
 private struct YOLODetection: Decodable {

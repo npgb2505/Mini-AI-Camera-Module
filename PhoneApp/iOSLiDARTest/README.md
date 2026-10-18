@@ -178,14 +178,17 @@ identify an object, choose a direction, or certify a safe path. The PWA stays
 browser-only and does not receive LiDAR measurements.
 
 For the iPhone-camera prototype, enabling YOLO sends a portrait JPEG to
-`POST /api/detect`, where YOLO runs on the computer, then maps the backend's normalized
-`[x1, y1, x2, y2]` box center back to the landscape ARKit depth map. It samples
-a small neighborhood and uses only valid depth values. There is no FOMO
-artifact involved in this path; it does not use a development mock as a
-detection result. These YOLO detections and their paired depth estimates are hidden once the
-processed frame is more than 2.5 seconds old; the live camera may have advanced
-since that YOLO frame. This is an estimate that still needs a known-distance
-check on the phone. A typed question is enabled only while the local camera
+`POST /api/detect`, where YOLO runs on the computer. Flask returns normalized
+`[x1, y1, x2, y2]` coordinates in the range 0–1; the app maps that box center
+back to the depth map copied from the exact same ARKit frame as the JPEG. It
+samples a small neighborhood and uses only valid depth values. The app sends at
+most 2.5 frames per second and skips frames while one inference is in progress;
+live YOLO requests time out after 12 seconds. There is no FOMO artifact
+involved in this path; it does not use a development mock as a detection
+result. These YOLO detections and their paired depth estimates are hidden once
+the processed frame is more than 2.5 seconds old; the live camera may have
+advanced since that YOLO frame. This is an estimate that still needs a
+known-distance check on the phone. A typed question is enabled only while the local camera
 frame is at most 2.5 seconds old; it sends that iPhone JPEG and the question as
 multipart form data to `POST /api/analyze`. Vision can fall back to the
 backend's YOLO summary when no Vision provider is configured.
@@ -251,19 +254,22 @@ untrusted network.
 The workflow definition at `.github/workflows/ios-lidar-test.yml` runs on pushes
 that change the native app or workflow. It generates the Xcode project with
 XcodeGen, runs nine LiDAR-depth checks, builds and launches the app in an iPhone
-16 Simulator, saves a launch screenshot, and packages an unsigned device IPA
+16 Simulator, exercises iPhone-mode navigation and the LiDAR readout with one
+UI test, saves a launch screenshot, and packages an unsigned device IPA
 retained for three days. It does not sign the app.
 
 The original repository is read-only for the connected account, so the app-only
 branch was pushed to the public fork
 [`npgb2505/Mini-AI-Camera-Module`](https://github.com/npgb2505/Mini-AI-Camera-Module)
 as `codex/ios-lidar-test-2026-10-11`. No KiCad files were included. GitHub
-Actions run [39088799047](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39088799047)
-succeeded on Xcode 16.4, passed nine depth checks, launched the app in the
-simulator, built the device app, and created `RoSight-unsigned-ipa`. The IPA is
-saved at `04_App/ios_builds/2026-10-18-run-39088799047/RoSight-unsigned.ipa`;
-the simulator launch image is at
-`04_App/ios_builds/2026-10-18-run-39088799047-simulator/launch.png`. The IPA is
+Actions run [39089707641](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39089707641)
+succeeded on Xcode 16.4, passed nine depth checks and one UI test that enters
+iPhone mode, finds the LiDAR readout, and returns to the mode chooser. It also
+launched the app in the simulator, built the device app, and created
+`RoSight-unsigned-ipa`. The IPA is saved at
+`04_App/ios_builds/2026-10-18-run-39089707641/RoSight-unsigned.ipa`; the
+simulator launch image is at
+`04_App/ios_builds/2026-10-18-run-39089707641-simulator/launch.png`. The IPA is
 arm64, targets iOS 16.0+, and is unsigned; AltServer on Windows must sign it
 before installation.
 Standard hosted runners are free for public repositories; private repositories
@@ -283,11 +289,12 @@ sideload guide](INSTALL_VI.md).
 ## Verification limits
 
 Source review and CI confirm the app's request paths, JSON fields,
-frame-sequence checks, pixel-to-normalized YOLO box conversion, synthetic
-depth-buffer handling, and simulator launch. The simulator has no iPhone 12 Pro
+frame-sequence checks, normalized Flask YOLO boxes mapped to the matching
+ARKit frame's depth map, synthetic depth-buffer handling, simulator launch,
+and navigation into the iPhone-mode readout. The simulator has no iPhone 12 Pro
 LiDAR; it cannot confirm camera permissions, physical LiDAR alignment or
 accuracy, device standby behavior, JPEG cadence, speech playback/routing, or
 Vision latency on hardware. The proximity threshold and speech behavior also
 have not been calibrated on an iPhone. The app has not been installed on a
-physical iPhone or connected ESP32. Do not treat simulator launch or an unsigned
-IPA build as a real-device test.
+physical iPhone or connected ESP32. Do not treat simulator launch or an
+unsigned IPA build as a real-device test.

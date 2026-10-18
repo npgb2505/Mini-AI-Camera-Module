@@ -6,8 +6,8 @@ enum DepthSnapshotChecks {
     static func main() {
         testLandscapeDepthMapUsesPortraitDetectionCoordinates()
         testPortraitDepthMapUsesDirectCoordinates()
-        testPixelDetectionBoxesAreNormalizedUsingSourceImageSize()
-        testInvalidPixelBoxDimensionsFailClosed()
+        testBackendNormalizedYOLOBoxMapsToPortraitDepth()
+        testMalformedNormalizedBoxFailsClosed()
         testCenterDistanceUsesMedian()
         testLowConfidenceSamplesAreIgnored()
         testCoreVideoDepthAndConfidenceBuffersAreCopied()
@@ -44,25 +44,24 @@ enum DepthSnapshotChecks {
         )
     }
 
-    private static func testPixelDetectionBoxesAreNormalizedUsingSourceImageSize() {
+    private static func testBackendNormalizedYOLOBoxMapsToPortraitDepth() {
         let width = 8
         let height = 6
         var values = Array(repeating: Float(4), count: width * height)
         fillNeighborhood(value: 1.25, centerX: 5, centerY: 3, width: width, in: &values)
         let snapshot = DepthSnapshot(width: width, height: height, values: values, confidence: [])
 
+        // Flask /api/detect returns box=[x1/width, y1/height, x2/width, y2/height].
+        let normalizedBox = [108.0 / 720, 624.0 / 960, 252.0 / 720, 816.0 / 960]
+
         assertDistance(
-            snapshot.distance(
-                pixelBox: [108, 624, 252, 816],
-                imageWidth: 720,
-                imageHeight: 960
-            ),
+            snapshot.distance(normalizedBox: normalizedBox),
             equals: 1.25,
-            named: "pixel detection box normalized to source image"
+            named: "normalized Flask YOLO box mapped to ARKit portrait depth"
         )
     }
 
-    private static func testInvalidPixelBoxDimensionsFailClosed() {
+    private static func testMalformedNormalizedBoxFailsClosed() {
         let snapshot = DepthSnapshot(
             width: 8,
             height: 6,
@@ -70,8 +69,12 @@ enum DepthSnapshotChecks {
             confidence: []
         )
         precondition(
-            snapshot.distance(pixelBox: [0, 0, 10, 10], imageWidth: 0, imageHeight: 960) == nil,
-            "pixel boxes without valid source dimensions must not produce LiDAR distances"
+            snapshot.distance(normalizedBox: [0.1, 0.1, 0.1]) == nil,
+            "incomplete normalized boxes must not produce LiDAR distances"
+        )
+        precondition(
+            snapshot.distance(normalizedBox: [0.5, 0.5, 0.5, 0.8]) == nil,
+            "zero-area normalized boxes must not produce LiDAR distances"
         )
     }
 

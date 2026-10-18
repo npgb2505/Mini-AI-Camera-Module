@@ -404,7 +404,7 @@ struct CameraScreen: View {
                         }
                     }
                 }
-                Text("Khoảng cách được ghép từ cùng frame iPhone và kích thước ảnh YOLO; nếu thiếu dữ liệu thì LiDAR không hiện số đo. Kết quả cũ tự ẩn.")
+                Text("Box YOLO Flask dùng tọa độ theo tỷ lệ của ảnh; app lấy depth từ cùng frame iPhone. Nếu thiếu depth tin cậy thì không hiện khoảng cách. Kết quả cũ tự ẩn.")
                     .font(.system(size: 9, weight: .regular, design: .rounded))
                     .foregroundStyle(.white.opacity(0.5))
             } else if model.phoneDetectionsFresh {

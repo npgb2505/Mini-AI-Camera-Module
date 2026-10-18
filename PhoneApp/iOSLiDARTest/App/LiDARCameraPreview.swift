@@ -52,6 +52,7 @@ struct LiDARCameraPreview: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, ARSessionDelegate {
+        private static let minimumFrameInterval: TimeInterval = 0.4
         private weak var model: CameraModel?
         private let stateLock = NSLock()
         private var detectionEnabled = false
@@ -105,7 +106,7 @@ struct LiDARCameraPreview: UIViewRepresentable {
                 }
             }
 
-            guard now - lastFrameUpdate >= 0.9,
+            guard now - lastFrameUpdate >= Self.minimumFrameInterval,
                   let jpeg = jpegFrame(frame.capturedImage) else {
                 return
             }
