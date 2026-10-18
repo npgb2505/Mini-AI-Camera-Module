@@ -68,12 +68,12 @@ PWA không cần IPA, chứng chỉ ký hay Apple Developer Program. Quick Tunne
 
 ### Chuẩn bị một workflow IPA
 
-1. Dùng GitHub repo mà bạn có quyền ghi, hoặc nhờ chủ repo cấp quyền trước. Nếu tự chọn một fork/repo khác, bạn tự tạo và đưa `PhoneApp/iOSLiDARTest/**` cùng `.github/workflows/ios-lidar-test.yml` lên đó; hướng dẫn này không tạo repo hay push mã thay bạn. Chỉ chọn file app/workflow cần build; working tree local hiện có thay đổi KiCad riêng, không đưa chúng vào upload native.
-2. Workflow phải có trên branch mặc định để GitHub cho chạy `workflow_dispatch`. Tại **Settings → Actions**, cho phép workflow nếu repo đang tắt Actions.
-3. iOS native cần Xcode trên macOS; Windows hiện tại không có `xcodebuild`/Swift iOS SDK. Bạn có thể dùng standard GitHub-hosted macOS runner mà không cần sở hữu Mac. Runner chuẩn miễn phí, không giới hạn cho repo công khai; repo riêng dùng quota plan và có thể phát sinh phí vượt quota. Xem [runner GitHub-hosted](https://docs.github.com/en/actions/reference/runners/github-hosted-runners), [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions) và [yêu cầu Xcode của Apple](https://developer.apple.com/xcode/system-requirements/) trước khi bật. Workflow này dùng runner `macos-15`.
-4. Chọn **Actions → Build iOS test IPA → Run workflow**, chọn branch app cần build, chờ job xanh rồi tải artifact `RoSight-unsigned-ipa`. Giải nén để lấy `RoSight-unsigned.ipa`. Artifact hiện được workflow giữ ba ngày.
+1. Nhánh app đã được đưa lên fork công khai [`npgb2505/Mini-AI-Camera-Module`](https://github.com/npgb2505/Mini-AI-Camera-Module), branch `codex/ios-lidar-test-2026-10-11`. Chỉ mã native app, tài liệu app và workflow được gửi lên; không có file KiCad.
+2. Bản dựng thành công là [GitHub Actions run 39087149275](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39087149275). IPA đã tải về máy tại `D:\KLTN\Camera_Edge_AI_Khiem_Thi\04_App\ios_builds\2026-10-18-run-39087149275\RoSight-unsigned.ipa`. Artifact trên GitHub được giữ ba ngày; mỗi lần push thay đổi app/workflow sẽ tự chạy lại.
+3. iOS native cần Xcode trên macOS; Windows hiện tại không có `xcodebuild`/Swift iOS SDK. GitHub Actions đã dùng runner `macos-15` để build nên không cần sở hữu Mac. Runner chuẩn miễn phí cho repo công khai; repo riêng dùng quota plan. Xem [runner GitHub-hosted](https://docs.github.com/en/actions/reference/runners/github-hosted-runners), [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions) và [yêu cầu Xcode của Apple](https://developer.apple.com/xcode/system-requirements/) nếu cần thay đổi cách build.
+4. Với lần build mới, mở tab **Actions** trong fork, chọn **Build iOS test IPA**, tải artifact `RoSight-unsigned-ipa` rồi giải nén để lấy `RoSight-unsigned.ipa`.
 
-Workflow build **unsigned**. Build PASS chỉ tạo gói cài, không chứng minh camera, ARKit, mic, BLE hoặc ESP32 chạy thật. Nếu không có quyền đưa branch/workflow lên một repo GitHub và chạy Actions, đường native hiện chưa dùng được; dùng PWA để thử app ngay.
+Workflow build **unsigned**. Build PASS tạo gói cài, nhưng chưa chứng minh camera, ARKit, BLE, âm thanh hoặc ESP32 chạy thật. Bước tiếp theo là ký IPA bằng AltServer trên Windows và kiểm tra ứng dụng trực tiếp trên iPhone 12 Pro.
 
 ### Cài AltServer trên Windows
 

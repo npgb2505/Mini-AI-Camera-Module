@@ -254,20 +254,23 @@ workflow file is present on the repository's default branch. It generates the
 Xcode project with XcodeGen, builds an unsigned iOS app, and packages an IPA
 artifact retained for three days. It does not sign the app.
 
-As of 2026-10-18, this workflow exists only in the local app branch: the branch,
-workflow, and IPA artifact are not present on the upstream GitHub repository.
-The connected GitHub account reports `READ` permission, and a noninteractive
-push dry-run was denied for lack of write access. No real push or dispatch was
-made. To produce an IPA, publish this app branch and workflow to a repository
-where the current account has write access and Actions can run. The standard
-macOS GitHub Actions workflow can then build the unsigned artifact for AltServer
-on Windows.
+The original repository is read-only for the connected account, so the app-only
+branch was pushed to the public fork
+[`npgb2505/Mini-AI-Camera-Module`](https://github.com/npgb2505/Mini-AI-Camera-Module)
+as `codex/ios-lidar-test-2026-10-11`. No KiCad files were included. GitHub
+Actions run [39087149275](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39087149275)
+succeeded on Xcode 16.4 and created `RoSight-unsigned-ipa`. A copy is saved in
+the project workspace at `04_App/ios_builds/2026-10-18-run-39087149275/`.
+The IPA is arm64, targets iOS 16.0+, and is unsigned; AltServer on Windows must
+sign it before installation.
 Standard hosted runners are free for public repositories; private repositories
 use the account's included quota. See the no-Mac [installation guide](INSTALL_VI.md).
 
 The current development host is Windows and has neither `xcodebuild` nor the
-Swift toolchain, so the current native source changes, including CoreBluetooth
-and speech playback, have not been compiled.
+Swift toolchain. The macOS workflow has compiled the current native source,
+including CoreBluetooth, LiDAR, and speech playback. It has not been installed
+or exercised on a physical iPhone; the build result alone does not verify
+camera permission, ARKit depth, BLE, audio, or ESP32 behavior.
 
 An unsigned IPA must be signed for installation. AltServer/AltStore can
 sideload it with a free Apple Account; follow the current AltStore instructions
