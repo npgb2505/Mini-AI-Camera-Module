@@ -266,14 +266,14 @@ The original repository is read-only for the connected account, so the app-only
 branch was pushed to the public fork
 [`npgb2505/Mini-AI-Camera-Module`](https://github.com/npgb2505/Mini-AI-Camera-Module)
 as `codex/ios-lidar-test-2026-10-11`. No KiCad files were included. GitHub
-Actions run [39090547344](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39090547344)
-succeeded on Xcode 16.4, passed nine depth checks and one UI test that enters
+Actions run [39092323818](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39092323818)
+succeeded on Xcode 16.4, passed ten depth checks and one UI test that enters
 iPhone mode, finds the LiDAR readout, and returns to the mode chooser. It also
 launched the app in the simulator, built the device app, and created
 `RoSight-unsigned-ipa`. The IPA is saved at
-`04_App/ios_builds/2026-10-18-run-39090547344/RoSight-unsigned.ipa`; the
+`04_App/ios_builds/2026-10-18-run-39092323818/RoSight-unsigned.ipa`; the
 simulator launch image is at
-`04_App/ios_builds/2026-10-18-run-39090547344-simulator/launch.png`. The IPA is
+`04_App/ios_builds/2026-10-18-run-39092323818-simulator/launch.png`. The IPA is
 arm64, targets iOS 16.0+, and is unsigned; AltServer on Windows must sign it
 before installation.
 Standard hosted runners are free for public repositories; private repositories
@@ -296,10 +296,10 @@ Source review and CI confirm the app's request paths, JSON fields,
 frame-sequence checks, normalized Flask YOLO boxes mapped to a confidence-
 filtered median from the matching ARKit frame's depth map, synthetic
 depth-buffer handling, simulator launch,
-and navigation into the iPhone-mode readout. The simulator has no iPhone 12 Pro
-LiDAR; it cannot confirm camera permissions, physical LiDAR alignment or
-accuracy, device standby behavior, JPEG cadence, speech playback/routing, or
-Vision latency on hardware. The proximity threshold and speech behavior also
+and navigation into the iPhone-mode readout. The simulator does not provide the
+iPhone 12 Pro Max LiDAR sensor; it cannot confirm camera permissions or physical
+LiDAR alignment and accuracy, device standby behavior, JPEG cadence, speech
+playback/routing, or Vision latency on hardware. The proximity threshold and speech behavior also
 have not been calibrated on an iPhone. The app has not been installed on a
 physical iPhone or connected ESP32. Do not treat simulator launch or an
 unsigned IPA build as a real-device test.
