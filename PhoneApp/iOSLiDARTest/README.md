@@ -258,10 +258,10 @@ The original repository is read-only for the connected account, so the app-only
 branch was pushed to the public fork
 [`npgb2505/Mini-AI-Camera-Module`](https://github.com/npgb2505/Mini-AI-Camera-Module)
 as `codex/ios-lidar-test-2026-10-11`. No KiCad files were included. GitHub
-Actions run [39087557900](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39087557900)
+Actions run [39087757328](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39087757328)
 succeeded on Xcode 16.4, passed six LiDAR depth-sampling checks, and created
 `RoSight-unsigned-ipa`. A copy is saved in the project workspace at
-`04_App/ios_builds/2026-10-18-run-39087557900/`. The IPA is arm64, targets iOS
+`04_App/ios_builds/2026-10-18-run-39087757328/`. The IPA is arm64, targets iOS
 16.0+, and is unsigned; AltServer on Windows must sign it before installation.
 Standard hosted runners are free for public repositories; private repositories
 use the account's included quota. See the no-Mac [installation guide](INSTALL_VI.md).
