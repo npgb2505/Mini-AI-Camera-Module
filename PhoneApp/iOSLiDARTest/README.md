@@ -3,7 +3,8 @@
 The app opens with a mode chooser. Camera access starts only after choosing a
 mode, so an ESP32-only session does not open the iPhone camera. iPhone 12 Pro
 and 12 Pro Max have a LiDAR Scanner, but the app still checks ARKit scene-depth
-support and waits for a real depth frame before showing a measurement.
+support and waits for a real depth frame before showing a measurement. The
+physical validation target is iPhone 12 Pro Max.
 
 The native app includes a CoreBluetooth client for the versioned Ro Sight GATT
 contract. The ESP-IDF source now includes a GATT service for identity, status,
@@ -179,13 +180,16 @@ browser-only and does not receive LiDAR measurements.
 
 For the iPhone-camera prototype, enabling YOLO sends a portrait JPEG to
 `POST /api/detect`, where YOLO runs on the computer. Flask returns normalized
-`[x1, y1, x2, y2]` coordinates in the range 0–1; the app maps that box center
-back to the depth map copied from the exact same ARKit frame as the JPEG. It
-samples a small neighborhood and uses only valid depth values. The app sends at
-most 2.5 frames per second and skips frames while one inference is in progress;
-live YOLO requests time out after 12 seconds. There is no FOMO artifact
-involved in this path; it does not use a development mock as a detection
-result. These YOLO detections and their paired depth estimates are hidden once
+`[x1, y1, x2, y2]` coordinates in the range 0–1; the app maps the central half
+of each box back to the depth map copied from the exact same ARKit frame as the
+JPEG. It reports the median of valid medium- or high-confidence LiDAR samples;
+if that region has no reliable depth, it reports no distance. Raw `sceneDepth`
+is preferred for lower latency, with `smoothedSceneDepth` as a fallback. The
+app sends at most 2.5 frames per second and skips frames while one inference is
+in progress; live YOLO requests time out after 12 seconds. Depth snapshots are
+copied only when YOLO is enabled to avoid needless work. There is no FOMO
+artifact involved in this path; it does not use a development mock as a
+detection result. These YOLO detections and their paired depth estimates are hidden once
 the processed frame is more than 2.5 seconds old; the live camera may have
 advanced since that YOLO frame. This is an estimate that still needs a
 known-distance check on the phone. A typed question is enabled only while the local camera
@@ -253,7 +257,7 @@ untrusted network.
 
 The workflow definition at `.github/workflows/ios-lidar-test.yml` runs on pushes
 that change the native app or workflow. It generates the Xcode project with
-XcodeGen, runs nine LiDAR-depth checks, builds and launches the app in an iPhone
+XcodeGen, runs ten LiDAR-depth checks, builds and launches the app in an iPhone
 16 Simulator, exercises iPhone-mode navigation and the LiDAR readout with one
 UI test, saves a launch screenshot, and packages an unsigned device IPA
 retained for three days. It does not sign the app.
@@ -289,8 +293,9 @@ sideload guide](INSTALL_VI.md).
 ## Verification limits
 
 Source review and CI confirm the app's request paths, JSON fields,
-frame-sequence checks, normalized Flask YOLO boxes mapped to the matching
-ARKit frame's depth map, synthetic depth-buffer handling, simulator launch,
+frame-sequence checks, normalized Flask YOLO boxes mapped to a confidence-
+filtered median from the matching ARKit frame's depth map, synthetic
+depth-buffer handling, simulator launch,
 and navigation into the iPhone-mode readout. The simulator has no iPhone 12 Pro
 LiDAR; it cannot confirm camera permissions, physical LiDAR alignment or
 accuracy, device standby behavior, JPEG cadence, speech playback/routing, or

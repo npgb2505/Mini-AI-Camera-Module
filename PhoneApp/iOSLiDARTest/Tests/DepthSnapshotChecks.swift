@@ -7,13 +7,14 @@ enum DepthSnapshotChecks {
         testLandscapeDepthMapUsesPortraitDetectionCoordinates()
         testPortraitDepthMapUsesDirectCoordinates()
         testBackendNormalizedYOLOBoxMapsToPortraitDepth()
+        testDetectionDistanceUsesInnerBoxMedian()
         testMalformedNormalizedBoxFailsClosed()
         testCenterDistanceUsesMedian()
         testLowConfidenceSamplesAreIgnored()
         testCoreVideoDepthAndConfidenceBuffersAreCopied()
         testInvalidDepthAndMalformedConfidenceFailClosed()
         testInvalidDetectionBoxesAreRejected()
-        print("DepthSnapshot checks passed: 9 cases")
+        print("DepthSnapshot checks passed: 10 cases")
     }
 
     private static func testLandscapeDepthMapUsesPortraitDetectionCoordinates() {
@@ -58,6 +59,28 @@ enum DepthSnapshotChecks {
             snapshot.distance(normalizedBox: normalizedBox),
             equals: 1.25,
             named: "normalized Flask YOLO box mapped to ARKit portrait depth"
+        )
+    }
+
+    private static func testDetectionDistanceUsesInnerBoxMedian() {
+        let width = 8
+        let height = 12
+        var values = Array(repeating: Float(4), count: width * height)
+
+        // This is the inner half of the portrait detection box. Its center has
+        // one outlier; the median should still describe the detected surface.
+        for y in 4...7 {
+            for x in 2...5 {
+                values[y * width + x] = 1.8
+            }
+        }
+        values[5 * width + 4] = 8.0
+        let snapshot = DepthSnapshot(width: width, height: height, values: values, confidence: [])
+
+        assertDistance(
+            snapshot.distance(normalizedBox: [0.25, 0.25, 0.75, 0.75]),
+            equals: 1.8,
+            named: "detection inner-box median ignores an isolated depth outlier"
         )
     }
 

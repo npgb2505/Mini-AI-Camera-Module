@@ -13,7 +13,7 @@ trên iPhone Simulator, build IPA thiết bị và upload artifact. Bản unsign
 nhất được lưu tại
 `D:\KLTN\Camera_Edge_AI_Khiem_Thi\04_App\ios_builds\2026-10-18-run-39090547344\RoSight-unsigned.ipa`.
 Simulator không có LiDAR iPhone; app chưa được ký, cài hoặc đo thử trên iPhone
-12 Pro thật.
+12 Pro Max thật.
 
 ## Chọn đường thử
 
@@ -76,7 +76,7 @@ PWA không cần IPA, chứng chỉ ký hay Apple Developer Program. Quick Tunne
 3. iOS native cần Xcode trên macOS; Windows hiện tại không có `xcodebuild`/Swift iOS SDK. GitHub Actions đã dùng runner `macos-15` để build nên không cần sở hữu Mac. Lượt CI đã chứng minh app mở được ở Simulator và tạo IPA unsigned; phần cài trên iPhone vẫn phải ký bằng AltServer. Runner chuẩn miễn phí cho repo công khai; repo riêng dùng quota plan. Xem [runner GitHub-hosted](https://docs.github.com/en/actions/reference/runners/github-hosted-runners), [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions) và [yêu cầu Xcode của Apple](https://developer.apple.com/xcode/system-requirements/) nếu cần thay đổi cách build.
 4. Với lần build mới, mở tab **Actions** trong fork, chọn **Build iOS test IPA**, tải artifact `RoSight-unsigned-ipa` rồi giải nén để lấy `RoSight-unsigned.ipa`.
 
-Workflow build **unsigned**. Build PASS tạo gói cài, nhưng chưa chứng minh camera, ARKit, BLE, âm thanh hoặc ESP32 chạy thật. Bước tiếp theo là ký IPA bằng AltServer trên Windows và kiểm tra ứng dụng trực tiếp trên iPhone 12 Pro.
+Workflow build **unsigned**. Build PASS tạo gói cài, nhưng chưa chứng minh camera, ARKit, BLE, âm thanh hoặc ESP32 chạy thật. Bước tiếp theo là ký IPA bằng AltServer trên Windows và kiểm tra ứng dụng trực tiếp trên iPhone 12 Pro Max.
 
 ### Cài AltServer trên Windows
 

@@ -79,7 +79,10 @@ struct LiDARCameraPreview: UIViewRepresentable {
 
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
             let now = frame.timestamp
-            let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth
+            // Prefer this frame's LiDAR measurement for timely proximity
+            // feedback; spatial median sampling limits isolated noise. Keep
+            // smoothed depth as a fallback for frames without raw depth.
+            let depthData = frame.sceneDepth ?? frame.smoothedSceneDepth
 
             if depthData != nil, !didReceiveSceneDepth {
                 didReceiveSceneDepth = true
@@ -111,13 +114,15 @@ struct LiDARCameraPreview: UIViewRepresentable {
                 return
             }
             lastFrameUpdate = now
-            let snapshot = depthData.flatMap {
-                DepthSnapshot.copy(depthMap: $0.depthMap, confidenceMap: $0.confidenceMap)
-            }
-
             stateLock.lock()
             let shouldRunYOLO = detectionEnabled
             stateLock.unlock()
+            let snapshot: DepthSnapshot?
+            if shouldRunYOLO, let depthData {
+                snapshot = DepthSnapshot.copy(depthMap: depthData.depthMap, confidenceMap: depthData.confidenceMap)
+            } else {
+                snapshot = nil
+            }
 
             let model = self.model
             Task { @MainActor [weak model] in

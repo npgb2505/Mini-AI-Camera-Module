@@ -68,9 +68,43 @@ struct DepthSnapshot: Sendable {
         let right = min(1, max(0, box[2]))
         let bottom = min(1, max(0, box[3]))
         guard right > left, bottom > top else { return nil }
-        let x = (left + right) / 2
-        let y = (top + bottom) / 2
-        return sample(x: x, y: y)
+
+        // YOLO boxes are in the portrait JPEG's coordinates. ARKit's rear
+        // camera depth map is commonly landscape-oriented, so rotate the
+        // rectangle back before sampling its center area.
+        let depthLeft: Double
+        let depthTop: Double
+        let depthRight: Double
+        let depthBottom: Double
+        if width > height {
+            depthLeft = top
+            depthTop = 1 - right
+            depthRight = bottom
+            depthBottom = 1 - left
+        } else {
+            depthLeft = left
+            depthTop = top
+            depthRight = right
+            depthBottom = bottom
+        }
+
+        // Avoid box edges, which often contain background depth. The inner
+        // half of the detection box is more likely to belong to the object.
+        let insetX = (depthRight - depthLeft) * 0.25
+        let insetY = (depthBottom - depthTop) * 0.25
+        guard let xRange = pixelRange(
+                  minimum: depthLeft + insetX,
+                  maximum: depthRight - insetX,
+                  count: width
+              ),
+              let yRange = pixelRange(
+                  minimum: depthTop + insetY,
+                  maximum: depthBottom - insetY,
+                  count: height
+              ) else {
+            return nil
+        }
+        return medianDepth(xRange: xRange, yRange: yRange)
     }
 
     private func sample(x: Double, y: Double) -> Double? {
@@ -95,12 +129,31 @@ struct DepthSnapshot: Sendable {
             pixelY = Int(normalizedY * Double(height - 1))
         }
 
+        let xRange = max(0, pixelX - 1)...min(width - 1, pixelX + 1)
+        let yRange = max(0, pixelY - 1)...min(height - 1, pixelY + 1)
+        return medianDepth(xRange: xRange, yRange: yRange)
+    }
+
+    private func pixelRange(minimum: Double, maximum: Double, count: Int) -> ClosedRange<Int>? {
+        guard count > 0, minimum.isFinite, maximum.isFinite, maximum >= minimum else { return nil }
+        let lastIndex = Double(count - 1)
+        let lower = min(count - 1, max(0, Int(floor(minimum * lastIndex))))
+        let upper = min(count - 1, max(0, Int(ceil(maximum * lastIndex))))
+        guard upper >= lower else { return nil }
+        return lower...upper
+    }
+
+    private func medianDepth(xRange: ClosedRange<Int>, yRange: ClosedRange<Int>) -> Double? {
+        guard width > 0,
+              height > 0,
+              values.count == width * height,
+              confidence.isEmpty || confidence.count == values.count else {
+            return nil
+        }
+
         var nearby: [Float] = []
-        for yOffset in -1...1 {
-            for xOffset in -1...1 {
-                let xIndex = pixelX + xOffset
-                let yIndex = pixelY + yOffset
-                guard xIndex >= 0, xIndex < width, yIndex >= 0, yIndex < height else { continue }
+        for yIndex in yRange {
+            for xIndex in xRange {
                 let index = yIndex * width + xIndex
                 if !confidence.isEmpty, confidence[index] < 1 { continue }
                 let value = values[index]
@@ -111,6 +164,10 @@ struct DepthSnapshot: Sendable {
         }
         guard !nearby.isEmpty else { return nil }
         nearby.sort()
-        return Double(nearby[nearby.count / 2])
+        let middle = nearby.count / 2
+        if nearby.count.isMultiple(of: 2) {
+            return (Double(nearby[middle - 1]) + Double(nearby[middle])) / 2
+        }
+        return Double(nearby[middle])
     }
 }
