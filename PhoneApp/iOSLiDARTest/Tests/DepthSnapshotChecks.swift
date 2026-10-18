@@ -6,12 +6,14 @@ enum DepthSnapshotChecks {
     static func main() {
         testLandscapeDepthMapUsesPortraitDetectionCoordinates()
         testPortraitDepthMapUsesDirectCoordinates()
+        testPixelDetectionBoxesAreNormalizedUsingSourceImageSize()
+        testInvalidPixelBoxDimensionsFailClosed()
         testCenterDistanceUsesMedian()
         testLowConfidenceSamplesAreIgnored()
         testCoreVideoDepthAndConfidenceBuffersAreCopied()
         testInvalidDepthAndMalformedConfidenceFailClosed()
         testInvalidDetectionBoxesAreRejected()
-        print("DepthSnapshot checks passed: 7 cases")
+        print("DepthSnapshot checks passed: 9 cases")
     }
 
     private static func testLandscapeDepthMapUsesPortraitDetectionCoordinates() {
@@ -39,6 +41,37 @@ enum DepthSnapshotChecks {
             snapshot.distance(normalizedBox: [0.65, 0.15, 0.85, 0.35]),
             equals: 0.65,
             named: "portrait depth-map coordinates"
+        )
+    }
+
+    private static func testPixelDetectionBoxesAreNormalizedUsingSourceImageSize() {
+        let width = 8
+        let height = 6
+        var values = Array(repeating: Float(4), count: width * height)
+        fillNeighborhood(value: 1.25, centerX: 5, centerY: 3, width: width, in: &values)
+        let snapshot = DepthSnapshot(width: width, height: height, values: values, confidence: [])
+
+        assertDistance(
+            snapshot.distance(
+                pixelBox: [108, 624, 252, 816],
+                imageWidth: 720,
+                imageHeight: 960
+            ),
+            equals: 1.25,
+            named: "pixel detection box normalized to source image"
+        )
+    }
+
+    private static func testInvalidPixelBoxDimensionsFailClosed() {
+        let snapshot = DepthSnapshot(
+            width: 8,
+            height: 6,
+            values: Array(repeating: Float(1), count: 8 * 6),
+            confidence: []
+        )
+        precondition(
+            snapshot.distance(pixelBox: [0, 0, 10, 10], imageWidth: 0, imageHeight: 960) == nil,
+            "pixel boxes without valid source dimensions must not produce LiDAR distances"
         )
     }
 

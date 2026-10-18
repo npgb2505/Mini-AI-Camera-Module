@@ -399,7 +399,7 @@ struct CameraScreen: View {
                         }
                     }
                 }
-                Text("Khoảng cách được ghép từ cùng frame iPhone đã gửi tới YOLO server; kết quả cũ tự ẩn.")
+                Text("Khoảng cách được ghép từ cùng frame iPhone và kích thước ảnh YOLO; nếu thiếu dữ liệu thì LiDAR không hiện số đo. Kết quả cũ tự ẩn.")
                     .font(.system(size: 9, weight: .regular, design: .rounded))
                     .foregroundStyle(.white.opacity(0.5))
             } else if model.phoneDetectionsFresh {

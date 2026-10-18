@@ -73,6 +73,23 @@ struct DepthSnapshot: Sendable {
         return sample(x: x, y: y)
     }
 
+    func distance(pixelBox box: [Double], imageWidth: Int, imageHeight: Int) -> Double? {
+        guard imageWidth > 0,
+              imageHeight > 0,
+              box.count >= 4,
+              box.prefix(4).allSatisfy({ $0.isFinite }) else {
+            return nil
+        }
+        let width = Double(imageWidth)
+        let height = Double(imageHeight)
+        return distance(normalizedBox: [
+            box[0] / width,
+            box[1] / height,
+            box[2] / width,
+            box[3] / height,
+        ])
+    }
+
     private func sample(x: Double, y: Double) -> Double? {
         guard width > 0,
               height > 0,

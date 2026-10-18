@@ -1369,20 +1369,32 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                   detectionEnabled,
                   detectionGeneration == phoneDetectionGeneration else { return }
             let payload = try Self.decode(YOLOPayload.self, data: data, response: response)
+            let imageWidth = payload.image?.width ?? 0
+            let imageHeight = payload.image?.height ?? 0
+            let imageSizeAvailable = imageWidth > 0 && imageHeight > 0
             detections = payload.detections.prefix(12).map { item in
                 FusedDetection(
                     label: item.label,
                     confidence: item.confidence,
-                    distanceMeters: depth?.distance(normalizedBox: item.box)
+                    distanceMeters: depth?.distance(
+                        pixelBox: item.box,
+                        imageWidth: imageWidth,
+                        imageHeight: imageHeight
+                    )
                 )
             }
             phoneDetectionsCapturedAt = capturedAt
             let detectionAge = Date().timeIntervalSince(capturedAt)
             phoneDetectionsFresh = detectionAge >= 0 && detectionAge <= Self.phoneDetectionFreshnessSeconds
             let timing = payload.inferenceMs.map { " · \(Int($0)) ms" } ?? ""
-            let depthStatus = depth == nil
-                ? "sceneDepth chưa có ở khung này."
-                : "khoảng cách sceneDepth là ước tính."
+            let depthStatus: String
+            if depth == nil {
+                depthStatus = "sceneDepth chưa có ở khung này."
+            } else if imageSizeAvailable {
+                depthStatus = "khoảng cách sceneDepth là ước tính."
+            } else {
+                depthStatus = "không ghép LiDAR: YOLO chưa trả kích thước ảnh."
+            }
             status = "YOLO server: \(detections.count) vật thể\(timing) · \(depthStatus)"
         } catch {
             if phoneModeActive,
@@ -1758,13 +1770,19 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
 private struct YOLOPayload: Decodable {
     let detections: [YOLODetection]
+    let image: YOLOImageSize?
     let inferenceMs: Double?
     let error: String?
 
     enum CodingKeys: String, CodingKey {
-        case detections, error
+        case detections, image, error
         case inferenceMs = "inference_ms"
     }
+}
+
+private struct YOLOImageSize: Decodable {
+    let width: Int
+    let height: Int
 }
 
 private struct YOLODetection: Decodable {
