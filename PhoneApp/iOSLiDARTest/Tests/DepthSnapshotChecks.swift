@@ -1,4 +1,5 @@
 import Foundation
+import CoreVideo
 
 @main
 enum DepthSnapshotChecks {
@@ -7,9 +8,10 @@ enum DepthSnapshotChecks {
         testPortraitDepthMapUsesDirectCoordinates()
         testCenterDistanceUsesMedian()
         testLowConfidenceSamplesAreIgnored()
+        testCoreVideoDepthAndConfidenceBuffersAreCopied()
         testInvalidDepthAndMalformedConfidenceFailClosed()
         testInvalidDetectionBoxesAreRejected()
-        print("DepthSnapshot checks passed: 6 cases")
+        print("DepthSnapshot checks passed: 7 cases")
     }
 
     private static func testLandscapeDepthMapUsesPortraitDetectionCoordinates() {
@@ -77,6 +79,34 @@ enum DepthSnapshotChecks {
         precondition(allLowConfidence.centerDistance() == nil, "all low-confidence readings must be unavailable")
     }
 
+    private static func testCoreVideoDepthAndConfidenceBuffersAreCopied() {
+        let width = 8
+        let height = 6
+        let depthMap = makePixelBuffer(
+            width: width,
+            height: height,
+            pixelFormat: kCVPixelFormatType_DepthFloat32
+        )
+        let confidenceMap = makePixelBuffer(
+            width: width,
+            height: height,
+            pixelFormat: kCVPixelFormatType_OneComponent8
+        )
+        fillDepthBuffer(depthMap, value: 1)
+        fillConfidenceBuffer(confidenceMap, value: 0)
+        writeDepth(2.75, x: 3, y: 2, to: depthMap)
+        writeConfidence(2, x: 3, y: 2, to: confidenceMap)
+
+        guard let copied = DepthSnapshot.copy(depthMap: depthMap, confidenceMap: confidenceMap) else {
+            preconditionFailure("valid ARKit-style depth buffers must copy")
+        }
+        precondition(copied.width == width && copied.height == height, "copied depth dimensions must match")
+        assertDistance(copied.centerDistance(), equals: 2.75, named: "CoreVideo depth/confidence copy")
+
+        let wrongFormat = makePixelBuffer(width: width, height: height, pixelFormat: kCVPixelFormatType_32BGRA)
+        precondition(DepthSnapshot.copy(depthMap: wrongFormat, confidenceMap: nil) == nil, "wrong depth formats must be rejected")
+    }
+
     private static func testInvalidDepthAndMalformedConfidenceFailClosed() {
         let width = 8
         let height = 6
@@ -127,5 +157,71 @@ enum DepthSnapshotChecks {
             preconditionFailure("\(name): expected \(expected)m, received no distance")
         }
         precondition(abs(actual - expected) < 0.001, "\(name): expected \(expected)m, received \(actual)m")
+    }
+
+    private static func makePixelBuffer(width: Int, height: Int, pixelFormat: OSType) -> CVPixelBuffer {
+        var pixelBuffer: CVPixelBuffer?
+        let result = CVPixelBufferCreate(kCFAllocatorDefault, width, height, pixelFormat, nil, &pixelBuffer)
+        precondition(result == kCVReturnSuccess, "CoreVideo test buffer creation failed: \(result)")
+        guard let pixelBuffer else { preconditionFailure("CoreVideo returned no test buffer") }
+        return pixelBuffer
+    }
+
+    private static func fillDepthBuffer(_ pixelBuffer: CVPixelBuffer, value: Float32) {
+        precondition(CVPixelBufferLockBaseAddress(pixelBuffer, []) == kCVReturnSuccess, "depth test buffer lock failed")
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            preconditionFailure("depth test buffer has no base address")
+        }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        for y in 0..<height {
+            let row = base.advanced(by: y * bytesPerRow).assumingMemoryBound(to: Float32.self)
+            for x in 0..<width {
+                row[x] = value
+            }
+        }
+    }
+
+    private static func fillConfidenceBuffer(_ pixelBuffer: CVPixelBuffer, value: UInt8) {
+        precondition(CVPixelBufferLockBaseAddress(pixelBuffer, []) == kCVReturnSuccess, "confidence test buffer lock failed")
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            preconditionFailure("confidence test buffer has no base address")
+        }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        for y in 0..<height {
+            let row = base.advanced(by: y * bytesPerRow).assumingMemoryBound(to: UInt8.self)
+            for x in 0..<width {
+                row[x] = value
+            }
+        }
+    }
+
+    private static func writeDepth(_ value: Float32, x: Int, y: Int, to pixelBuffer: CVPixelBuffer) {
+        precondition(CVPixelBufferLockBaseAddress(pixelBuffer, []) == kCVReturnSuccess, "depth test buffer lock failed")
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            preconditionFailure("depth test buffer has no base address")
+        }
+        let row = base
+            .advanced(by: y * CVPixelBufferGetBytesPerRow(pixelBuffer))
+            .assumingMemoryBound(to: Float32.self)
+        row[x] = value
+    }
+
+    private static func writeConfidence(_ value: UInt8, x: Int, y: Int, to pixelBuffer: CVPixelBuffer) {
+        precondition(CVPixelBufferLockBaseAddress(pixelBuffer, []) == kCVReturnSuccess, "confidence test buffer lock failed")
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            preconditionFailure("confidence test buffer has no base address")
+        }
+        let row = base
+            .advanced(by: y * CVPixelBufferGetBytesPerRow(pixelBuffer))
+            .assumingMemoryBound(to: UInt8.self)
+        row[x] = value
     }
 }

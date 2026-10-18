@@ -8,7 +8,10 @@ struct DepthSnapshot: Sendable {
     let confidence: [UInt8]
 
     static func copy(depthMap: CVPixelBuffer, confidenceMap: CVPixelBuffer?) -> DepthSnapshot? {
-        CVPixelBufferLockBaseAddress(depthMap, .readOnly)
+        guard CVPixelBufferGetPixelFormatType(depthMap) == kCVPixelFormatType_DepthFloat32,
+              CVPixelBufferLockBaseAddress(depthMap, .readOnly) == kCVReturnSuccess else {
+            return nil
+        }
         defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
 
         let width = CVPixelBufferGetWidth(depthMap)
@@ -30,20 +33,24 @@ struct DepthSnapshot: Sendable {
         }
 
         var confidence: [UInt8] = []
-        if let confidenceMap,
-           CVPixelBufferGetWidth(confidenceMap) == width,
-           CVPixelBufferGetHeight(confidenceMap) == height {
-            CVPixelBufferLockBaseAddress(confidenceMap, .readOnly)
+        if let confidenceMap {
+            guard CVPixelBufferGetPixelFormatType(confidenceMap) == kCVPixelFormatType_OneComponent8,
+                  CVPixelBufferGetWidth(confidenceMap) == width,
+                  CVPixelBufferGetHeight(confidenceMap) == height,
+                  CVPixelBufferLockBaseAddress(confidenceMap, .readOnly) == kCVReturnSuccess else {
+                return nil
+            }
             defer { CVPixelBufferUnlockBaseAddress(confidenceMap, .readOnly) }
-            if let confidenceBase = CVPixelBufferGetBaseAddress(confidenceMap) {
-                let confidenceBytesPerRow = CVPixelBufferGetBytesPerRow(confidenceMap)
-                confidence.reserveCapacity(width * height)
-                for rowIndex in 0..<height {
-                    let row = confidenceBase
-                        .advanced(by: rowIndex * confidenceBytesPerRow)
-                        .assumingMemoryBound(to: UInt8.self)
-                    confidence.append(contentsOf: UnsafeBufferPointer(start: row, count: width))
-                }
+            guard let confidenceBase = CVPixelBufferGetBaseAddress(confidenceMap) else {
+                return nil
+            }
+            let confidenceBytesPerRow = CVPixelBufferGetBytesPerRow(confidenceMap)
+            confidence.reserveCapacity(width * height)
+            for rowIndex in 0..<height {
+                let row = confidenceBase
+                    .advanced(by: rowIndex * confidenceBytesPerRow)
+                    .assumingMemoryBound(to: UInt8.self)
+                confidence.append(contentsOf: UnsafeBufferPointer(start: row, count: width))
             }
         }
 
