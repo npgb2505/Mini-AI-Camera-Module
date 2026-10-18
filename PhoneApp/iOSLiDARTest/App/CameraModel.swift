@@ -349,12 +349,12 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
 
     var phoneDetectorStatusMessage: String {
         switch phoneDetectorReady {
-        case true:
+        case .some(true):
             let model = phoneDetectorModel.map { " (\($0))" } ?? ""
             return "YOLO\(model) chạy trên Flask cho prototype camera iPhone; đây không phải model ESP32. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
-        case false:
+        case .some(false):
             return "YOLO server trên Flask chưa sẵn sàng cho prototype camera iPhone. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
-        case nil:
+        case .none:
             return "Chưa xác minh YOLO server cho prototype camera iPhone. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
         }
     }

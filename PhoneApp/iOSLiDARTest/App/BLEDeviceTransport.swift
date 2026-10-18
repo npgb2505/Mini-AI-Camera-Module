@@ -623,7 +623,10 @@ final class BLEDeviceTransport: NSObject, ObservableObject,
 
     private func decodeStatus(_ data: Data, receivedAtUptime: TimeInterval) {
         guard let identity else {
-            pendingStatusPayload = (data, receivedAtUptime)
+            pendingStatusPayload = BLEAssembledPayload(
+                data: data,
+                receivedAtUptime: receivedAtUptime
+            )
             return
         }
         do {
@@ -1002,7 +1005,7 @@ extension BLEDeviceTransport {
     ) {
         guard peripheral.identifier == activePeripheral?.identifier else { return }
         isWritingFragments = false
-        if let error {
+        if error != nil {
             pendingWriteFragments = []
             pendingWriteCharacteristic = nil
             requestedReplayFor = nil

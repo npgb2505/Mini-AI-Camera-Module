@@ -874,11 +874,11 @@ struct CameraScreen: View {
 
     private var phoneDepthStatusLabel: String {
         switch model.phoneSceneDepthSupported {
-        case false:
+        case .some(false):
             return "sceneDepth không hỗ trợ"
-        case true:
+        case .some(true):
             return model.centerDistance == nil ? "LiDAR · chờ dữ liệu" : "LiDAR · có dữ liệu"
-        case nil:
+        case .none:
             return "LiDAR · kiểm tra"
         }
     }
