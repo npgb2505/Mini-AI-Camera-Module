@@ -197,6 +197,15 @@ frame is at most 2.5 seconds old; it sends that iPhone JPEG and the question as
 multipart form data to `POST /api/analyze`. Vision can fall back to the
 backend's YOLO summary when no Vision provider is configured.
 
+When the Flask response also includes `hazard_zones`, the app shows MobileNet's
+left/center/right hazard probabilities and maps each full-height image region
+to `sceneDepth` from the same ARKit frame. This is displayed as **Depth vùng**:
+the median can include floor or background depth and is not a verified
+distance to the detected obstacle. Missing or low-confidence depth stays
+unknown. The current preview uses a 0.35 hazard threshold selected on public
+validation data; recalibrate it with iPhone/OV3660 camera scenes before any
+real navigation use.
+
 ### ESP32 FOMO artifact handoff
 
 ESP32-local FOMO is the target detector. The current ESP-IDF detector backend

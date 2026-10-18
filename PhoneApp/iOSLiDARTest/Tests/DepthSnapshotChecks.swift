@@ -7,6 +7,7 @@ enum DepthSnapshotChecks {
         testLandscapeDepthMapUsesPortraitDetectionCoordinates()
         testPortraitDepthMapUsesDirectCoordinates()
         testBackendNormalizedYOLOBoxMapsToPortraitDepth()
+        testThreeNavigationZonesMapToTheirARKitDepthRegions()
         testDetectionDistanceUsesInnerBoxMedian()
         testMalformedNormalizedBoxFailsClosed()
         testCenterDistanceUsesMedian()
@@ -14,7 +15,7 @@ enum DepthSnapshotChecks {
         testCoreVideoDepthAndConfidenceBuffersAreCopied()
         testInvalidDepthAndMalformedConfidenceFailClosed()
         testInvalidDetectionBoxesAreRejected()
-        print("DepthSnapshot checks passed: 10 cases")
+        print("DepthSnapshot checks passed: 11 cases")
     }
 
     private static func testLandscapeDepthMapUsesPortraitDetectionCoordinates() {
@@ -59,6 +60,38 @@ enum DepthSnapshotChecks {
             snapshot.distance(normalizedBox: normalizedBox),
             equals: 1.25,
             named: "normalized Flask YOLO box mapped to ARKit portrait depth"
+        )
+    }
+
+    private static func testThreeNavigationZonesMapToTheirARKitDepthRegions() {
+        let width = 32
+        let height = 30
+        var values = Array(repeating: Float(8), count: width * height)
+        for y in 22...27 {
+            for x in 7...24 { values[y * width + x] = 1.2 }
+        }
+        for y in 12...17 {
+            for x in 7...24 { values[y * width + x] = 2.4 }
+        }
+        for y in 2...8 {
+            for x in 7...24 { values[y * width + x] = 3.6 }
+        }
+        let snapshot = DepthSnapshot(width: width, height: height, values: values, confidence: [])
+
+        assertDistance(
+            snapshot.distance(normalizedBox: [0, 0, 1.0 / 3.0, 1]),
+            equals: 1.2,
+            named: "left portrait navigation zone maps to its rotated ARKit depth area"
+        )
+        assertDistance(
+            snapshot.distance(normalizedBox: [1.0 / 3.0, 0, 2.0 / 3.0, 1]),
+            equals: 2.4,
+            named: "center portrait navigation zone maps to its rotated ARKit depth area"
+        )
+        assertDistance(
+            snapshot.distance(normalizedBox: [2.0 / 3.0, 0, 1, 1]),
+            equals: 3.6,
+            named: "right portrait navigation zone maps to its rotated ARKit depth area"
         )
     }
 

@@ -10,6 +10,24 @@ struct FusedDetection: Identifiable {
     let distanceMeters: Double?
 }
 
+struct FusedHazardZone: Identifiable {
+    let zone: String
+    let hazardProbability: Double
+    let isHazard: Bool
+    let depthMeters: Double?
+
+    var id: String { zone }
+
+    var displayName: String {
+        switch zone {
+        case "left": return "Trái"
+        case "center": return "Giữa"
+        case "right": return "Phải"
+        default: return zone.capitalized
+        }
+    }
+}
+
 private struct PendingDeviceButtonAction {
     let event: DeviceButtonEventPayload
     let deviceID: String
@@ -34,6 +52,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     @Published private(set) var phoneSceneDepthSupported: Bool?
     @Published private(set) var phoneProximityAlertStatus = "Chưa có số đo LiDAR mới."
     @Published var detections: [FusedDetection] = []
+    @Published private(set) var phoneHazardZones: [FusedHazardZone] = []
     @Published var answer = ""
     @Published private(set) var isSpeakingAnswer = false
     @Published private(set) var speechError: String?
@@ -152,6 +171,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             return age >= 0 && age <= Self.phoneDetectionFreshnessSeconds
         } ?? false
         if phoneDetectionsFresh != detectionFresh { phoneDetectionsFresh = detectionFresh }
+        if !detectionFresh, !phoneHazardZones.isEmpty { phoneHazardZones = [] }
     }
 
     func configure(
@@ -315,6 +335,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         phoneNearReadingLatched = false
         phoneProximityAlertStatus = "Chưa có số đo LiDAR mới."
         detections = []
+        phoneHazardZones = []
         answer = ""
         status = "Đang khởi động camera LiDAR…"
         Task { await refreshVisionCapabilitiesIfNeeded(force: true) }
@@ -340,6 +361,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         phoneNearReadingLatched = false
         phoneProximityAlertStatus = "Chưa có số đo LiDAR mới."
         detections = []
+        phoneHazardZones = []
         answer = ""
     }
 
@@ -436,6 +458,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         phoneDetectionGeneration += 1
         detectionEnabled = enabled
         detections = []
+        phoneHazardZones = []
         phoneDetectionsCapturedAt = nil
         phoneDetectionsFresh = false
         status = enabled ? "Đang chờ kết quả YOLO server mới từ Flask…" : "Đã tạm dừng gửi frame iPhone tới YOLO server."
@@ -1353,6 +1376,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             status = "Cần Flask để chạy YOLO server cho prototype camera iPhone."
             detectionEnabled = false
             detections = []
+            phoneHazardZones = []
             phoneDetectionsCapturedAt = nil
             phoneDetectionsFresh = false
             return
@@ -1376,6 +1400,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                     distanceMeters: depth?.distance(normalizedBox: item.box)
                 )
             }
+            phoneHazardZones = fuseHazardZones(payload.hazardZones, depth: depth)
             phoneDetectionsCapturedAt = capturedAt
             let detectionAge = Date().timeIntervalSince(capturedAt)
             phoneDetectionsFresh = detectionAge >= 0 && detectionAge <= Self.phoneDetectionFreshnessSeconds
@@ -1386,17 +1411,54 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             } else {
                 depthStatus = "khoảng cách sceneDepth là ước tính."
             }
-            status = "YOLO server: \(detections.count) vật thể\(timing) · \(depthStatus)"
+            let zoneStatus: String
+            if phoneHazardZones.isEmpty {
+                zoneStatus = ""
+            } else if phoneHazardZones.contains(where: { $0.isHazard }) {
+                zoneStatus = " · MobileNet báo vùng có nguy cơ"
+            } else {
+                zoneStatus = " · MobileNet đã phân tích ba vùng"
+            }
+            status = "YOLO server: \(detections.count) vật thể\(timing)\(zoneStatus) · \(depthStatus)"
         } catch {
             if phoneModeActive,
                modeGeneration == phoneModeGeneration,
                detectionGeneration == phoneDetectionGeneration,
                !Task.isCancelled {
                 detections = []
+                phoneHazardZones = []
                 phoneDetectionsCapturedAt = nil
                 phoneDetectionsFresh = false
                 status = userFacingErrorMessage(error, fallback: "Chưa gửi được frame tới YOLO Flask. Kiểm tra kết nối rồi thử lại.")
             }
+        }
+    }
+
+    private func fuseHazardZones(_ payload: YOLOHazardZones?, depth: DepthSnapshot?) -> [FusedHazardZone] {
+        guard payload?.status == "ready", let zones = payload?.zones else { return [] }
+        return zones.compactMap { zone in
+            guard let probability = zone.hazardProbability,
+                  probability.isFinite,
+                  (0...1).contains(probability),
+                  let box = Self.normalizedZoneBox(zone.id) else {
+                return nil
+            }
+            let isHazard = zone.isHazard ?? (probability >= (payload?.threshold ?? 0.35))
+            return FusedHazardZone(
+                zone: zone.id,
+                hazardProbability: probability,
+                isHazard: isHazard,
+                depthMeters: depth?.distance(normalizedBox: box)
+            )
+        }
+    }
+
+    private static func normalizedZoneBox(_ zone: String) -> [Double]? {
+        switch zone {
+        case "left": return [0, 0, 1.0 / 3.0, 1]
+        case "center": return [1.0 / 3.0, 0, 2.0 / 3.0, 1]
+        case "right": return [2.0 / 3.0, 0, 1, 1]
+        default: return nil
         }
     }
 
@@ -1762,11 +1824,31 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 private struct YOLOPayload: Decodable {
     let detections: [YOLODetection]
     let inferenceMs: Double?
+    let hazardZones: YOLOHazardZones?
     let error: String?
 
     enum CodingKeys: String, CodingKey {
         case detections, error
         case inferenceMs = "inference_ms"
+        case hazardZones = "hazard_zones"
+    }
+}
+
+private struct YOLOHazardZones: Decodable {
+    let status: String?
+    let threshold: Double?
+    let zones: [YOLOHazardZone]?
+}
+
+private struct YOLOHazardZone: Decodable {
+    let id: String
+    let hazardProbability: Double?
+    let isHazard: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case hazardProbability = "hazard_probability"
+        case isHazard = "is_hazard"
     }
 }
 

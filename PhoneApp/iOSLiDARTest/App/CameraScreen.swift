@@ -417,6 +417,47 @@ struct CameraScreen: View {
                     .foregroundStyle(.white.opacity(0.55))
             }
 
+            if model.phoneDetectionsFresh, !model.phoneHazardZones.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("NGUY CƠ THEO VÙNG · MOBILENET")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .tracking(0.8)
+                        .foregroundStyle(.white.opacity(0.7))
+                    HStack(alignment: .top, spacing: 7) {
+                        ForEach(model.phoneHazardZones) { item in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(item.displayName)
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white)
+                                Text(item.isHazard ? "Có thể có vật cản" : "Chưa nhận ra")
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(item.isHazard ? .orange : .mint)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(String(format: "Nguy cơ %.0f%%", item.hazardProbability * 100))
+                                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.72))
+                                Text(item.depthMeters.map {
+                                    String(format: "Depth vùng ≈ %.2f m", $0)
+                                } ?? "LiDAR vùng chưa rõ")
+                                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.mint.opacity(0.9))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(9)
+                            .background(
+                                item.isHazard ? Color.orange.opacity(0.13) : Color.white.opacity(0.07),
+                                in: RoundedRectangle(cornerRadius: 12)
+                            )
+                        }
+                    }
+                    Text("Depth vùng là trung vị sceneDepth của cùng ARFrame, có thể gồm nền hoặc mặt đất; đây chưa phải cự ly đã xác nhận tới vật cản. Kết quả cũ tự ẩn.")
+                        .font(.system(size: 9, weight: .regular, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             Text(model.phoneDetectorStatusMessage)
                 .font(.system(size: 10, weight: .regular, design: .rounded))
                 .foregroundStyle(.white.opacity(0.5))
