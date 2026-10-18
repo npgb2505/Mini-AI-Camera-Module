@@ -24,9 +24,12 @@ struct DeviceStatusPayload: Decodable {
     let detectionsFrameSeq: Int?
     let detectionsAgeMs: Double?
     let detectionsBootId: String?
+    let detectorModel: String?
+    let inferenceStatus: String?
     let cameraFrameInfo: DeviceFrameInfo?
     let deviceLink: DeviceLinkPayload?
     let zones: [DeviceZone]?
+    let corridorDecision: DeviceCorridorDecision?
     let tofAgeMs: Double?
     let tofBootId: String?
     let tofMode: String?
@@ -36,9 +39,11 @@ struct DeviceStatusPayload: Decodable {
     let deviceHealth: DeviceHealthPayload?
     let buttonEvent: DeviceButtonEventPayload?
     let buttonEventAgeMs: Int?
+    let buttonEvents: [DeviceButtonEventRecord]?
 
     enum CodingKeys: String, CodingKey {
         case source, detections, zones
+        case corridorDecision = "corridor_decision"
         case cameraInputState = "camera_input_state"
         case cameraAgeMs = "camera_age_ms"
         case cameraFrame = "camera_frame"
@@ -46,6 +51,8 @@ struct DeviceStatusPayload: Decodable {
         case detectionsFrameSeq = "detections_frame_seq"
         case detectionsAgeMs = "detections_age_ms"
         case detectionsBootId = "detections_boot_id"
+        case detectorModel = "detector_model"
+        case inferenceStatus = "inference_status"
         case cameraFrameInfo = "camera_frame_info"
         case deviceLink = "device_link"
         case tofAgeMs = "tof_age_ms"
@@ -57,6 +64,7 @@ struct DeviceStatusPayload: Decodable {
         case deviceHealth = "device_health"
         case buttonEvent = "button_event"
         case buttonEventAgeMs = "button_event_age_ms"
+        case buttonEvents = "button_events"
     }
 
     var resolvedOperationEnabled: Bool? {
@@ -81,6 +89,25 @@ struct DeviceStatusPayload: Decodable {
 
     var resolvedDetectionsAgeMs: Double? {
         detectionsAgeMs ?? deviceLink?.inferenceAgeMs
+    }
+}
+
+struct DeviceCorridorDecision: Decodable {
+    let origin: String?
+    let bootId: String?
+    let frameSeq: Int?
+    let tofSeq: Int?
+    let risk: String?
+    let recommendedZone: String?
+    let reasonCodes: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case origin, risk
+        case bootId = "boot_id"
+        case frameSeq = "frame_seq"
+        case tofSeq = "tof_seq"
+        case recommendedZone = "recommended_zone"
+        case reasonCodes = "reason_codes"
     }
 }
 
@@ -160,6 +187,16 @@ struct DeviceButtonEventPayload: Decodable {
     }
 }
 
+struct DeviceButtonEventRecord: Decodable {
+    let event: DeviceButtonEventPayload
+    let ageMs: Int
+
+    enum CodingKeys: String, CodingKey {
+        case event
+        case ageMs = "age_ms"
+    }
+}
+
 struct DeviceDetection: Decodable, Identifiable {
     let className: String?
     let label: String?
@@ -201,10 +238,14 @@ struct DeviceZone: Decodable, Identifiable {
 struct DeviceCapabilitiesPayload: Decodable {
     let visionReady: Bool
     let visionProvider: String?
+    let detectorReady: Bool?
+    let detectorModel: String?
 
     enum CodingKeys: String, CodingKey {
         case visionReady = "vision_ready"
         case visionProvider = "vision_provider"
+        case detectorReady = "detector_ready"
+        case detectorModel = "detector_model"
     }
 }
 
@@ -218,6 +259,32 @@ struct DeviceAskPayload: Decodable {
         case answer, error
         case frameSeq = "frame_seq"
         case visionUsed = "vision_used"
+    }
+}
+
+struct DeviceControlResponse: Decodable {
+    let command: String?
+    let ack: DeviceCommandAck?
+    let operationEnabled: Bool?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case command, ack, error
+        case operationEnabled = "operation_enabled"
+    }
+}
+
+struct DeviceCommandAck: Decodable {
+    let type: String?
+    let requestId: String?
+    let command: String?
+    let ok: Bool?
+    let errorCode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type, command, ok
+        case requestId = "request_id"
+        case errorCode = "error_code"
     }
 }
 

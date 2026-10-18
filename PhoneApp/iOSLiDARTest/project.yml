@@ -23,7 +23,8 @@ targets:
       properties:
         CFBundleDisplayName: "Ro Sight"
         NSCameraUsageDescription: "Ro Sight dùng camera sau và LiDAR để hiển thị cảnh trực tiếp và ước tính khoảng cách."
-        NSLocalNetworkUsageDescription: "Ro Sight kết nối tới máy tính chạy YOLO trong cùng mạng."
+        NSBluetoothAlwaysUsageDescription: "Ro Sight dùng Bluetooth LE để tìm ESP32 và nhận trạng thái, số đo ToF cùng sự kiện nút."
+        NSLocalNetworkUsageDescription: "Ro Sight dùng Flask để nhận ảnh, hỏi Vision và đọc trạng thái ESP32; YOLO trên máy tính chỉ dành cho prototype camera iPhone."
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         UISupportedInterfaceOrientations:

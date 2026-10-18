@@ -8,7 +8,9 @@ private enum RoSightMode: Equatable {
 
 struct CameraScreen: View {
     @StateObject private var model = CameraModel()
+    @StateObject private var bluetoothTransport = BLEDeviceTransport()
     @AppStorage("roSight.backendURL") private var backendURL = ""
+    @AppStorage("roSight.phoneProximityAlertsEnabled") private var phoneProximityAlertsEnabled = true
     @State private var accountUsername = ""
     @State private var accountPassword = ""
     @State private var accessUsername = ""
@@ -19,7 +21,9 @@ struct CameraScreen: View {
     @State private var showSettings = false
     @State private var phoneAskTask: Task<Void, Never>?
     @State private var deviceAskTask: Task<Void, Never>?
+    @State private var deviceControlTask: Task<Void, Never>?
     @State private var deviceSpeechTask: Task<Void, Never>?
+    @State private var requestedDeviceVolume = 50.0
 
     var body: some View {
         Group {
@@ -56,6 +60,13 @@ struct CameraScreen: View {
             .presentationDragIndicator(.visible)
         }
         .onAppear {
+            let cameraModel = model
+            bluetoothTransport.onButtonEvent = { event in
+                cameraModel.receiveBLEButtonEvent(event)
+            }
+            bluetoothTransport.lastHandledPressID = { deviceID, bootID in
+                cameraModel.lastHandledBLEPressID(deviceID: deviceID, bootID: bootID)
+            }
             model.configure(
                 baseURL: backendURL,
                 accountUsername: accountUsername,
@@ -108,7 +119,7 @@ struct CameraScreen: View {
                 }
 
                 Spacer(minLength: 0)
-                Text("Cần backend Ro Sight để chạy YOLO hoặc gửi câu hỏi tới Vision. Camera iPhone chỉ khởi động khi chọn chế độ iPhone.")
+                Text("YOLO trên Flask chỉ dùng cho prototype camera iPhone. ESP32 cần model FOMO chạy cục bộ; camera iPhone chỉ khởi động khi chọn chế độ iPhone.")
                     .font(.system(size: 11, weight: .regular, design: .rounded))
                     .foregroundStyle(.white.opacity(0.48))
                     .fixedSize(horizontal: false, vertical: true)
@@ -188,6 +199,12 @@ struct CameraScreen: View {
                     }
                 }
             }
+            .onAppear {
+                model.setPhoneProximityAlertsEnabled(phoneProximityAlertsEnabled)
+            }
+            .onChange(of: phoneProximityAlertsEnabled) { enabled in
+                model.setPhoneProximityAlertsEnabled(enabled)
+            }
         }
     }
 
@@ -199,7 +216,7 @@ struct CameraScreen: View {
                 Image(systemName: "square.grid.2x2")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 42, height: 42)
+                    .frame(width: 48, height: 48)
                     .background(.black.opacity(0.55), in: Circle())
             }
             .accessibilityLabel("Chọn chế độ camera")
@@ -216,14 +233,15 @@ struct CameraScreen: View {
             Spacer(minLength: 6)
             HStack(spacing: 6) {
                 Circle()
-                    .fill(model.centerDistance == nil ? .orange : .mint)
+                    .fill(model.phoneSceneDepthSupported == true && model.centerDistance != nil ? .mint : .orange)
                     .frame(width: 7, height: 7)
-                Text(model.centerDistance == nil ? "LiDAR · chờ dữ liệu" : "LiDAR · có dữ liệu")
+                Text(phoneDepthStatusLabel)
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
             .background(.black.opacity(0.55), in: Capsule())
+            .accessibilityElement(children: .combine)
             settingsButton
         }
     }
@@ -235,7 +253,7 @@ struct CameraScreen: View {
             Image(systemName: "slider.horizontal.3")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 42, height: 42)
+                .frame(width: 48, height: 48)
                 .background(.black.opacity(0.55), in: Circle())
         }
         .accessibilityLabel("Cài đặt backend")
@@ -256,6 +274,7 @@ struct CameraScreen: View {
                 )
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(.black)
+                .frame(minHeight: 44)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
                 .background(.mint, in: Capsule())
@@ -291,6 +310,10 @@ struct CameraScreen: View {
                 .tracking(1.5)
                 .foregroundStyle(.white.opacity(0.72))
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Khoảng cách LiDAR tại tâm khung hình")
+        .accessibilityValue(model.centerDistance.map { String(format: "%.2f mét", $0) } ?? "Chưa có số đo mới")
+        .accessibilityHint("Số đo sceneDepth là ước tính; app không dùng số đo này để khẳng định lối đi an toàn.")
         .padding(.horizontal, 20)
         .padding(.vertical, 15)
         .background(.black.opacity(0.52), in: RoundedRectangle(cornerRadius: 22))
@@ -301,13 +324,34 @@ struct CameraScreen: View {
 
     private var phoneControlPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Toggle(isOn: $phoneProximityAlertsEnabled) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Đọc cảnh báo khoảng cách")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("iPhone sẽ đọc số đo tâm dưới 0,8 m; phát lại sau khi vượt 1,05 m.")
+                        .font(.system(size: 10, weight: .regular, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(.mint)
+            .accessibilityLabel("Cảnh báo khoảng cách LiDAR trên iPhone")
+            .accessibilityValue(phoneProximityAlertsEnabled ? "Bật" : "Tắt")
+            .accessibilityHint("Chỉ đọc số đo sceneDepth mới tại tâm khung hình. Cảnh báo không phân loại vật cản hoặc lối đi.")
+
+            Text(model.phoneProximityAlertStatus)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.7))
+                .fixedSize(horizontal: false, vertical: true)
+
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(model.phoneDetectionsFresh
-                         ? "YOLO CÓ KẾT QUẢ MỚI"
+                         ? "YOLO FLASK · KẾT QUẢ MỚI"
                          : model.isDetecting
-                           ? "ĐANG CHỜ YOLO"
-                           : model.detectionEnabled ? "YOLO ĐANG BẬT" : "YOLO TẠM DỪNG")
+                           ? "ĐANG CHỜ YOLO FLASK"
+                           : model.detectionEnabled ? "YOLO FLASK ĐANG BẬT" : "YOLO FLASK TẠM DỪNG")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .tracking(1)
                         .foregroundStyle(model.phoneDetectionsFresh ? .mint : model.detectionEnabled ? .orange : .white.opacity(0.65))
@@ -329,10 +373,10 @@ struct CameraScreen: View {
                     Image(systemName: model.detectionEnabled ? "pause.fill" : "play.fill")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.black)
-                        .frame(width: 42, height: 42)
+                        .frame(width: 48, height: 48)
                         .background(.mint, in: Circle())
                 }
-                .accessibilityLabel(model.detectionEnabled ? "Tạm dừng gửi khung tới YOLO" : "Bật gửi khung tới YOLO")
+                .accessibilityLabel(model.detectionEnabled ? "Tạm dừng gửi khung camera iPhone tới YOLO server Flask" : "Bật YOLO server Flask cho camera iPhone")
             }
 
             if model.phoneDetectionsFresh, !model.detections.isEmpty {
@@ -355,24 +399,31 @@ struct CameraScreen: View {
                         }
                     }
                 }
-                Text("Khoảng cách được ghép từ cùng ảnh YOLO; kết quả cũ tự ẩn.")
+                Text("Khoảng cách được ghép từ cùng frame iPhone đã gửi tới YOLO server; kết quả cũ tự ẩn.")
                     .font(.system(size: 9, weight: .regular, design: .rounded))
                     .foregroundStyle(.white.opacity(0.5))
             } else if model.phoneDetectionsFresh {
-                Text("Khung YOLO mới chưa thấy vật thể rõ.")
+                Text("YOLO server chưa thấy vật thể rõ trong frame iPhone mới.")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.55))
             } else {
-                Text(model.detectionEnabled ? "Đang chờ kết quả YOLO từ một khung mới." : "Bật YOLO để nhận diện; kết quả cũ sẽ tự ẩn.")
+                Text(model.detectionEnabled ? "Đang chờ kết quả YOLO server từ frame iPhone mới." : "Bật YOLO server cho camera iPhone; kết quả cũ sẽ tự ẩn.")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.55))
             }
+
+            Text(model.phoneDetectorStatusMessage)
+                .font(.system(size: 10, weight: .regular, design: .rounded))
+                .foregroundStyle(.white.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 9) {
                 TextField("Hỏi về khung hình hiện tại…", text: $phoneQuestion, axis: .vertical)
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .lineLimit(1...3)
                     .textInputAutocapitalization(.sentences)
+                    .accessibilityLabel("Câu hỏi về hình ảnh iPhone")
+                    .accessibilityHint("Dùng mic Dictation trên bàn phím nếu muốn nói câu hỏi. App chỉ gửi phần chữ.")
                     .padding(.horizontal, 13)
                     .padding(.vertical, 10)
                     .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
@@ -382,20 +433,20 @@ struct CameraScreen: View {
                 } label: {
                     if model.isAsking {
                         ProgressView().tint(.black)
-                            .frame(width: 43, height: 43)
+                            .frame(width: 48, height: 48)
                             .background(.mint, in: Circle())
                     } else {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(.black)
-                            .frame(width: 43, height: 43)
+                            .frame(width: 48, height: 48)
                             .background(.mint, in: Circle())
                     }
                 }
                 .disabled(model.isAsking || !model.phoneFrameFresh || phoneQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityLabel("Hỏi Vision LLM về ảnh iPhone")
             }
-            Text("Dùng Dictation trên bàn phím iPhone; app gửi phần chữ và không ghi âm micro.")
+            Text("Chạm mic Dictation trên bàn phím iPhone để nói; app gửi phần chữ, không gửi bản ghi âm.")
                 .font(.system(size: 10, weight: .regular, design: .rounded))
                 .foregroundStyle(.white.opacity(0.55))
             Text(model.phoneFrameFresh ? "Khung camera mới sẵn sàng để hỏi." : "Đang chờ khung camera mới; thao tác hỏi đang khóa.")
@@ -439,7 +490,7 @@ struct CameraScreen: View {
                             Image(systemName: "arrow.left")
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .frame(width: 42, height: 42)
+                                .frame(width: 48, height: 48)
                                 .background(.white.opacity(0.1), in: Circle())
                         }
                         .accessibilityLabel("Chọn chế độ camera")
@@ -455,6 +506,8 @@ struct CameraScreen: View {
                         Spacer(minLength: 0)
                         settingsButton
                     }
+
+                    BLEDevicePanel(transport: bluetoothTransport)
 
                     HStack(spacing: 10) {
                         Circle()
@@ -537,9 +590,11 @@ struct CameraScreen: View {
                         .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 17))
                     }
 
-                    if !model.deviceDetections.isEmpty {
-                        VStack(alignment: .leading, spacing: 9) {
-                            sectionLabel("YOLO KHỚP VỚI FRAME")
+                    VStack(alignment: .leading, spacing: 9) {
+                        sectionLabel(model.deviceFomoOutputForCurrentFrame
+                                     ? "FOMO ESP32 · FRAME MỚI"
+                                     : "FOMO CỤC BỘ ESP32 · ĐANG CHỜ")
+                        if model.deviceFomoOutputForCurrentFrame, !model.deviceDetections.isEmpty {
                             ForEach(Array(model.deviceDetections.enumerated()), id: \.offset) { entry in
                                 let item = entry.element
                                 HStack {
@@ -556,6 +611,11 @@ struct CameraScreen: View {
                                 .padding(11)
                                 .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 13))
                             }
+                        } else {
+                            Text(model.deviceFomoStatusMessage)
+                                .font(.system(size: 12, weight: .regular, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.65))
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
 
@@ -588,6 +648,100 @@ struct CameraScreen: View {
                     }
 
                     VStack(alignment: .leading, spacing: 9) {
+                        sectionLabel("FUSION · FRAME VÀ TOF")
+                        if let decision = model.deviceCorridorDecision {
+                            Text(fusionRiskLabel(decision.risk))
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white)
+                            if let zone = decision.recommendedZone, zone != "unknown" {
+                                Text("Vùng firmware đề xuất: \(fusionZoneLabel(zone)).")
+                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.mint)
+                            }
+                            Text("Frame fusion \(decision.frameSeq ?? 0) · ToF event \(decision.tofSeq.map { String($0) } ?? "không có") · cùng phiên firmware")
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.58))
+                        } else if model.deviceConnection?.transport != "firmware_wifi" {
+                            Text("USB bridge hiện chưa cung cấp fusion đã xác nhận; trạng thái là unknown.")
+                                .font(.system(size: 12, weight: .regular, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.62))
+                        } else {
+                            Text(model.deviceOperationEnabled == false
+                                 ? "Thiết bị tạm dừng nên chưa có quyết định fusion mới."
+                                 : "Chưa có quyết định fusion mới, còn hạn và cùng phiên; giữ trạng thái unknown.")
+                                .font(.system(size: 12, weight: .regular, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.62))
+                        }
+                        Text("Trạng thái fusion của firmware không xác nhận lối đi an toàn.")
+                            .font(.system(size: 10, weight: .regular, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.48))
+                    }
+                    .padding(13)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 17))
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        sectionLabel("ĐIỀU KHIỂN ĐƯỢC FIRMWARE HỖ TRỢ")
+                        Text("Chỉ Wi-Fi firmware trực tiếp nhận lệnh âm lượng và bật/tắt cảnh báo. USB bridge chỉ đọc; cài đặt không bật MODE.")
+                            .font(.system(size: 11, weight: .regular, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Stepper("Âm lượng gửi · \(Int(requestedDeviceVolume))%", value: $requestedDeviceVolume, in: 0...100, step: 5)
+                            .disabled(!model.deviceCanControl || model.isSendingDeviceControl)
+                            .accessibilityHint("Gửi cài đặt set volume tới firmware; đây không phải số đo âm lượng hiện tại.")
+                        Button {
+                            deviceControlTask?.cancel()
+                            deviceControlTask = Task {
+                                await model.sendDeviceControl(command: "set_volume", volume: Int(requestedDeviceVolume))
+                            }
+                        } label: {
+                            Label(model.isSendingDeviceControl ? "Đang gửi lệnh…" : "Gửi âm lượng", systemImage: "slider.horizontal.3")
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.black)
+                                .frame(maxWidth: .infinity, minHeight: 50)
+                                .background(.mint, in: RoundedRectangle(cornerRadius: 14))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!model.deviceCanControl || model.isSendingDeviceControl)
+                        .accessibilityLabel("Gửi mức âm lượng tới ESP32")
+
+                        HStack(spacing: 9) {
+                            deviceAlertControlButton(title: "Bật cảnh báo", enabled: true)
+                            deviceAlertControlButton(title: "Tắt cảnh báo", enabled: false)
+                        }
+                        if !model.deviceCanControl {
+                            Text("\(model.deviceControlUnavailableMessage) Firmware chưa có lệnh bật MODE từ xa.")
+                                .font(.system(size: 10, weight: .regular, design: .rounded))
+                                .foregroundStyle(.orange.opacity(0.9))
+                        }
+                        if model.deviceOperationEnabled == false {
+                            Text("ESP32 vẫn standby; firmware ACK cài đặt không có nghĩa thiết bị đã bắt đầu hoạt động.")
+                                .font(.system(size: 10, weight: .regular, design: .rounded))
+                                .foregroundStyle(.orange.opacity(0.9))
+                        }
+                        Text("ACK chỉ xác nhận firmware nhận lệnh; chưa xác nhận loa, cảm biến hoặc cảnh báo hoạt động. Firmware hiện không báo lại giá trị cài đặt hiện tại.")
+                            .font(.system(size: 10, weight: .regular, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let error = model.deviceControlError {
+                            Text(error)
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityAddTraits(.isStaticText)
+                        }
+                        if let message = model.deviceControlMessage {
+                            Text(message)
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(.mint)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityAddTraits(.isStaticText)
+                        }
+                    }
+                    .padding(13)
+                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 17))
+
+                    VStack(alignment: .leading, spacing: 9) {
                         sectionLabel("HỎI VISION VỀ FRAME MỚI")
                         Text("Backend lấy JPEG mới trực tiếp từ ESP32 rồi kiểm tra lại trạng thái hoạt động và độ mới trước khi gửi tới Vision.")
                             .font(.system(size: 11, weight: .regular, design: .rounded))
@@ -607,20 +761,20 @@ struct CameraScreen: View {
                             } label: {
                                 if model.isDeviceAsking {
                                     ProgressView().tint(.black)
-                                        .frame(width: 43, height: 43)
+                                        .frame(width: 48, height: 48)
                                         .background(.mint, in: Circle())
                                 } else {
                                     Image(systemName: "arrow.up")
                                         .font(.system(size: 15, weight: .bold))
                                         .foregroundStyle(.black)
-                                        .frame(width: 43, height: 43)
+                                        .frame(width: 48, height: 48)
                                         .background(.mint, in: Circle())
                                 }
                             }
                             .disabled(!model.deviceCanAsk || deviceQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .accessibilityLabel("Hỏi Vision về ảnh ESP32")
                         }
-                        Text("Dùng Dictation trên bàn phím iPhone; app gửi phần chữ và không ghi âm micro.")
+            Text("Chạm mic Dictation trên bàn phím iPhone để nói; app gửi phần chữ, không gửi bản ghi âm.")
                             .font(.system(size: 10, weight: .regular, design: .rounded))
                             .foregroundStyle(.white.opacity(0.52))
                         if model.deviceVisionReady == false {
@@ -718,6 +872,55 @@ struct CameraScreen: View {
         }
     }
 
+    private var phoneDepthStatusLabel: String {
+        switch model.phoneSceneDepthSupported {
+        case false:
+            return "sceneDepth không hỗ trợ"
+        case true:
+            return model.centerDistance == nil ? "LiDAR · chờ dữ liệu" : "LiDAR · có dữ liệu"
+        case nil:
+            return "LiDAR · kiểm tra"
+        }
+    }
+
+    private func deviceAlertControlButton(title: String, enabled: Bool) -> some View {
+        Button {
+            deviceControlTask?.cancel()
+            deviceControlTask = Task {
+                await model.sendDeviceControl(command: "set_alerts", alertsEnabled: enabled)
+            }
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(enabled ? .black : .white)
+                .frame(maxWidth: .infinity, minHeight: 50)
+                .background(enabled ? Color.mint : Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.deviceCanControl || model.isSendingDeviceControl)
+        .accessibilityLabel("\(title) trên ESP32")
+        .accessibilityHint("Gửi lệnh cấu hình tới firmware Wi-Fi. ACK không xác nhận loa hoặc cảnh báo đang hoạt động.")
+    }
+
+    private func fusionRiskLabel(_ risk: String?) -> String {
+        switch risk {
+        case "clear": return "Firmware fusion: clear"
+        case "caution": return "Firmware fusion: cần thận trọng"
+        case "stop": return "Firmware fusion: dừng"
+        default: return "Firmware fusion: chưa đủ dữ liệu"
+        }
+    }
+
+    private func fusionZoneLabel(_ zone: String) -> String {
+        switch zone {
+        case "left": return "trái"
+        case "center": return "giữa"
+        case "right": return "phải"
+        case "stop": return "dừng"
+        default: return "chưa xác định"
+        }
+    }
+
     private var deviceStateLabel: String {
         if model.deviceCameraReady { return "FRAME MỚI · HOẠT ĐỘNG" }
         if model.deviceOperationEnabled == false { return "THIẾT BỊ TẠM DỪNG" }
@@ -751,8 +954,11 @@ struct CameraScreen: View {
             model.stopPhoneMode()
         }
         if selectedMode == .device, mode != .device {
+            bluetoothTransport.suspendDeviceModeConnection()
             deviceAskTask?.cancel()
             deviceAskTask = nil
+            deviceControlTask?.cancel()
+            deviceControlTask = nil
             deviceSpeechTask?.cancel()
             deviceSpeechTask = nil
             model.cancelDeviceAsk()
@@ -763,6 +969,231 @@ struct CameraScreen: View {
             model.startPhoneMode()
         }
         selectedMode = mode
+    }
+}
+
+private struct BLEDevicePanel: View {
+    @ObservedObject var transport: BLEDeviceTransport
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 9) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.mint)
+                Text("BLUETOOTH · ESP32")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundStyle(.white)
+                Spacer(minLength: 6)
+                Text(transport.isContractFresh ? "BLE v1 · LIVE" : transport.isLinkConnected ? "ĐANG XÁC MINH" : "CHƯA KẾT NỐI")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(transport.isContractFresh ? .mint : .orange)
+            }
+
+            Text(transport.managerMessage)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.66))
+            Text(transport.displayedConnectionMessage)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.66))
+
+            HStack(spacing: 9) {
+                Button {
+                    transport.startScan()
+                } label: {
+                    Label(transport.isScanning ? "Đang quét…" : "Quét ESP32 BLE", systemImage: "magnifyingglass")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.black)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(.mint, in: RoundedRectangle(cornerRadius: 13))
+                }
+                .buttonStyle(.plain)
+                .disabled(transport.isScanning || transport.isLinkConnected)
+                .accessibilityHint("Tìm thiết bị quảng bá service Ro Sight BLE v1.")
+
+                if transport.isLinkConnected {
+                    Button {
+                        transport.disconnectByUser()
+                    } label: {
+                        Label("Ngắt", systemImage: "xmark.circle")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .frame(minWidth: 78, minHeight: 44)
+                            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Ngắt Bluetooth với ESP32")
+                }
+            }
+
+            if !transport.discoveredDevices.isEmpty {
+                VStack(spacing: 7) {
+                    ForEach(transport.discoveredDevices) { device in
+                        HStack(spacing: 9) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(device.name)
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white)
+                                    .lineLimit(1)
+                                Text("Tín hiệu \(device.rssi) dBm")
+                                    .font(.system(size: 9, weight: .regular, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.5))
+                            }
+                            Spacer(minLength: 4)
+                            let isCurrentPeripheral = transport.connectedPeripheralID == device.id
+                            Button(transport.isContractFresh && isCurrentPeripheral ? "BLE v1 live" : isCurrentPeripheral ? "Đang xác minh" : "Kết nối") {
+                                transport.connect(to: device.id)
+                            }
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.mint)
+                            .disabled(isCurrentPeripheral)
+                            .accessibilityLabel(isCurrentPeripheral
+                                ? "Đang xác minh hợp đồng BLE v1 với \(device.name)"
+                                : "Kết nối Bluetooth tới \(device.name)")
+                        }
+                        .padding(10)
+                        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+            }
+
+            if let identity = transport.identity {
+                Text("\(transport.connectedName ?? "ESP32") · device \(identity.deviceId.prefix(8)) · boot \(identity.bootId.prefix(8))")
+                    .font(.system(size: 9, weight: .medium, design: .rounded).monospaced())
+                    .foregroundStyle(.white.opacity(0.48))
+                    .textSelection(.enabled)
+            }
+
+            if transport.isContractFresh, let status = transport.status {
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(status.operationEnabled ? .mint : .orange)
+                        .frame(width: 7, height: 7)
+                    Text(status.operationEnabled ? "ESP32 đang hoạt động" : "ESP32 đang tạm dừng")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Spacer(minLength: 4)
+                    Text("status \(transport.statusAgeMs.map { "\($0) ms" } ?? "—")")
+                        .font(.system(size: 9, weight: .regular, design: .rounded).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                .padding(10)
+                .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
+
+                Text("Camera \(status.cameraOK ? "sẵn sàng" : "chưa sẵn sàng") · frame #\(status.cameraFrameSeq.map { String($0) } ?? "—") · Wi-Fi \(status.networkOK.map { $0 ? "đang nối" : "mất kết nối" } ?? "chưa rõ")")
+                    .font(.system(size: 9, weight: .regular, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.55))
+
+                if status.zones.isEmpty {
+                    Text("ESP32 chưa gửi vùng ToF hợp lệ.")
+                        .font(.system(size: 10, weight: .regular, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.5))
+                } else {
+                    HStack(spacing: 7) {
+                        ForEach(status.zones) { zone in
+                            let fresh = isToFSampleFresh(status)
+                            VStack(spacing: 4) {
+                                Text(zoneLabel(zone.zone))
+                                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.55))
+                                Text(fresh && zone.tofValid
+                                     ? zone.nearestCm.map { String(format: "%.0f cm", $0) } ?? "—"
+                                     : "—")
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+                                    .foregroundStyle(fresh && zone.tofValid ? .mint : .white.opacity(0.4))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 11))
+                        }
+                    }
+                }
+                Text(isToFSampleFresh(status)
+                     ? "ToF trực tiếp qua BLE · đo mới dưới 350 ms · không gắn với vật thể trong ảnh."
+                     : "Đang chờ ToF hợp lệ, cùng phiên và mới dưới 350 ms.")
+                    .font(.system(size: 9, weight: .regular, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if transport.status != nil {
+                Text("Status BLE đã cũ hoặc GATT chưa sẵn sàng; đang chờ dữ liệu mới.")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.orange.opacity(0.9))
+            }
+
+            if transport.isContractFresh, let event = transport.latestButtonEvent {
+                Text("Nút BLE gần nhất: \(buttonLabel(event.buttonId)) · press #\(event.pressId). Ảnh và hỏi Vision vẫn cần Wi-Fi.")
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(.mint.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let replayHistoryMessage = transport.replayHistoryMessage {
+                Text(replayHistoryMessage)
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(transport.replayHistoryNeedsAttention ? .orange : .mint.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(replayHistoryMessage)
+            }
+
+            if let error = transport.errorMessage {
+                Text(error)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text("BLE dùng cho discovery, status, ToF và nút. FOMO ESP32 đi qua sự kiện detections trên Wi-Fi firmware rồi tới snapshot Flask; YOLO Flask chỉ là prototype camera iPhone. JPEG/video, Vision và PCM loa dùng Wi-Fi/Flask.")
+                .font(.system(size: 9, weight: .regular, design: .rounded))
+                .foregroundStyle(.white.opacity(0.46))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(13)
+        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 17))
+        .onAppear { transport.reconnectSavedDeviceIfAvailable() }
+        .task {
+            while !Task.isCancelled {
+                transport.refreshStatusAge()
+                do {
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                } catch {
+                    break
+                }
+            }
+        }
+    }
+
+    private func isToFSampleFresh(_ status: BLEDeviceStatus) -> Bool {
+        let hasValidZone = status.zones.contains { zone in
+            guard zone.tofValid, let distance = zone.nearestCm else { return false }
+            return distance.isFinite && (0...100_000).contains(distance)
+        }
+        guard transport.isContractFresh,
+              status.tofOK,
+              hasValidZone,
+              let statusAge = transport.statusAgeMs,
+              let tofAge = status.tofAgeMs else {
+            return false
+        }
+        return Double(statusAge) + Double(tofAge) <= 350
+    }
+
+    private func zoneLabel(_ zone: String) -> String {
+        switch zone {
+        case "left": return "TRÁI"
+        case "center": return "GIỮA"
+        case "right": return "PHẢI"
+        default: return zone.uppercased()
+        }
+    }
+
+    private func buttonLabel(_ buttonID: String) -> String {
+        switch buttonID {
+        case "mode": return "MODE"
+        case "capture_image": return "CHỤP"
+        case "ask_llm": return "HỎI AI"
+        default: return buttonID
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AVFoundation
+import UIKit
 
 struct FusedDetection: Identifiable {
     let id = UUID()
@@ -19,12 +20,19 @@ private struct PendingDeviceButtonAction {
     let expectedFrameSequence: Int?
 }
 
+private struct PendingBLEButtonEvent {
+    let event: BLEButtonEvent
+    let receivedAtUptime: TimeInterval
+}
+
 @MainActor
 final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSynthesizerDelegate {
     @Published var detectionEnabled = false
     @Published var isDetecting = false
     @Published var isAsking = false
     @Published var centerDistance: Double?
+    @Published private(set) var phoneSceneDepthSupported: Bool?
+    @Published private(set) var phoneProximityAlertStatus = "Chưa có số đo LiDAR mới."
     @Published var detections: [FusedDetection] = []
     @Published var answer = ""
     @Published private(set) var isSpeakingAnswer = false
@@ -32,6 +40,8 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     @Published var status = "Chọn chế độ camera để bắt đầu."
     @Published private(set) var phoneFrameFresh = false
     @Published private(set) var phoneDetectionsFresh = false
+    @Published private(set) var phoneDetectorReady: Bool?
+    @Published private(set) var phoneDetectorModel: String?
 
     private var backendBaseURL = ""
     private var accountUsername = ""
@@ -46,6 +56,8 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     private var latestJPEG: Data?
     private var latestJPEGAt: Date?
     private var phoneDepthUpdatedAt: Date?
+    private var phoneProximityAlertsEnabled = true
+    private var phoneNearReadingLatched = false
     private var phoneDetectionsCapturedAt: Date?
     private var lastVisionStatusCheck: Date?
     private var phoneModeActive = false
@@ -57,6 +69,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     private let speechSynthesizer = AVSpeechSynthesizer()
     private var activeSpeechUtteranceID: ObjectIdentifier?
     private var speechSessionActive = false
+    private var activeSpeechIsProximityAlert = false
 
     @Published private(set) var deviceConnection: DeviceConnectionPayload?
     @Published private(set) var deviceFrameData: Data?
@@ -72,6 +85,9 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     @Published private(set) var isDeviceAsking = false
     @Published private(set) var isSendingDeviceSpeech = false
     @Published private(set) var deviceSpeakerMessage: String?
+    @Published private(set) var isSendingDeviceControl = false
+    @Published private(set) var deviceControlMessage: String?
+    @Published private(set) var deviceControlError: String?
     @Published private(set) var isRefreshingDevice = false
     @Published private(set) var deviceFreshnessRevision = 0
     @Published private(set) var deviceButtonMessage: String?
@@ -86,6 +102,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     private var lastDeviceCameraReady: Bool?
     private var handledDeviceButtonEventKeys: Set<String>
     private var handledDeviceButtonEventOrder: [String]
+    private var pendingBLEButtonEvents: [PendingBLEButtonEvent] = []
     private static let handledDeviceButtonEventsDefaultsKey = "roSight.handledDeviceButtonEvents.v1"
     private static let maximumHandledDeviceButtonEvents = 512
     private static let deviceFrameFreshnessMs = 350.0
@@ -94,6 +111,8 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
     private static let phoneFrameFreshnessSeconds = 2.5
     private static let phoneDetectionFreshnessSeconds = 2.5
     private static let phoneDepthFreshnessSeconds = 1.0
+    static let phoneProximityAlertThresholdMeters = 0.8
+    static let phoneProximityResetThresholdMeters = 1.05
 
     override init() {
         let savedButtonEvents = Array(
@@ -121,6 +140,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             if age < 0 || age > Self.phoneDepthFreshnessSeconds {
                 centerDistance = nil
                 self.phoneDepthUpdatedAt = nil
+                phoneProximityAlertStatus = "LiDAR quá hạn; đang chờ số đo mới."
                 if !detectionEnabled {
                     status = "Đang chờ sceneDepth mới."
                 }
@@ -161,10 +181,15 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             deviceStatusReceivedAtUptime = nil
             deviceVisionReady = nil
             deviceVisionProvider = nil
+            phoneDetectorReady = nil
+            phoneDetectorModel = nil
             deviceConnection = nil
             deviceError = nil
             deviceAskError = nil
             deviceSpeakerMessage = nil
+            deviceControlMessage = nil
+            deviceControlError = nil
+            isSendingDeviceControl = false
             deviceAnswer = ""
             deviceAnswerFrameSequence = nil
             deviceAnswerButtonPressId = nil
@@ -186,7 +211,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         self.accessUsername = accessUsername
         self.accessPassword = accessPassword
         if backendBaseURL.isEmpty {
-            status = "Nhập địa chỉ Flask để bật YOLO hoặc hỏi AI."
+            status = "Nhập địa chỉ Flask để dùng YOLO server trong prototype camera iPhone hoặc hỏi AI."
         } else if self.accountUsername.isEmpty || self.accountPassword.isEmpty {
             status = "Nhập tài khoản Ro Sight trong cài đặt để kết nối."
         } else {
@@ -196,10 +221,72 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
 
     func updateCenterDistance(_ value: Double?) {
         guard phoneModeActive else { return }
-        centerDistance = value
-        phoneDepthUpdatedAt = value == nil ? nil : Date()
-        if value == nil, !detectionEnabled {
+        let freshReading = value.flatMap { reading in
+            reading.isFinite && (0.15...10).contains(reading) ? reading : nil
+        }
+        centerDistance = freshReading
+        phoneDepthUpdatedAt = freshReading == nil ? nil : Date()
+        updatePhoneProximityAlert(for: freshReading)
+        if freshReading == nil, !detectionEnabled {
             status = "Chưa nhận được dữ liệu LiDAR."
+        }
+    }
+
+    func updatePhoneSceneDepthSupport(_ supported: Bool) {
+        guard phoneModeActive else { return }
+        phoneSceneDepthSupported = supported
+    }
+
+    func setPhoneProximityAlertsEnabled(_ enabled: Bool) {
+        guard phoneProximityAlertsEnabled != enabled else { return }
+        phoneProximityAlertsEnabled = enabled
+        if !enabled {
+            phoneNearReadingLatched = false
+            phoneProximityAlertStatus = "Đã tắt đọc cảnh báo LiDAR."
+            if activeSpeechIsProximityAlert {
+                stopSpeakingAnswer()
+            }
+            return
+        }
+        phoneNearReadingLatched = false
+        phoneProximityAlertStatus = "Đã bật; đang chờ số đo LiDAR mới để đọc cảnh báo."
+    }
+
+    private func updatePhoneProximityAlert(for distance: Double?) {
+        guard phoneProximityAlertsEnabled else { return }
+        guard let distance else {
+            phoneProximityAlertStatus = "Chưa có số đo LiDAR mới; cảnh báo không dùng dữ liệu cũ."
+            return
+        }
+
+        if distance <= Self.phoneProximityAlertThresholdMeters {
+            guard !phoneNearReadingLatched else { return }
+            phoneNearReadingLatched = true
+            let formattedDistance = String(format: "%.1f", distance)
+                .replacingOccurrences(of: ".", with: ",")
+            let message = "LiDAR đo bề mặt tại tâm khung hình ở khoảng \(formattedDistance) mét. Đây là số đo ước tính."
+            phoneProximityAlertStatus = "Cảnh báo LiDAR: \(message)"
+            announcePhoneProximityAlert(message)
+            return
+        }
+
+        if distance >= Self.phoneProximityResetThresholdMeters {
+            phoneNearReadingLatched = false
+            phoneProximityAlertStatus = "Đang chờ số đo ở tâm dưới 0,8 mét."
+        } else if !phoneNearReadingLatched {
+            let formattedDistance = String(format: "%.1f", distance)
+                .replacingOccurrences(of: ".", with: ",")
+            phoneProximityAlertStatus = "LiDAR tại tâm: \(formattedDistance) mét; cảnh báo dưới 0,8 mét."
+        }
+    }
+
+    private func announcePhoneProximityAlert(_ message: String) {
+        speechError = nil
+        if UIAccessibility.isVoiceOverRunning {
+            stopSpeakingAnswer()
+            UIAccessibility.post(notification: .announcement, argument: message)
+        } else {
+            speakOnPhone(message, isAnswer: false, isProximityAlert: true)
         }
     }
 
@@ -224,9 +311,13 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         phoneDetectionsCapturedAt = nil
         phoneDetectionsFresh = false
         centerDistance = nil
+        phoneSceneDepthSupported = nil
+        phoneNearReadingLatched = false
+        phoneProximityAlertStatus = "Chưa có số đo LiDAR mới."
         detections = []
         answer = ""
         status = "Đang khởi động camera LiDAR…"
+        Task { await refreshVisionCapabilitiesIfNeeded(force: true) }
     }
 
     func stopPhoneMode() {
@@ -245,11 +336,30 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         phoneDetectionsCapturedAt = nil
         phoneDetectionsFresh = false
         centerDistance = nil
+        phoneSceneDepthSupported = nil
+        phoneNearReadingLatched = false
+        phoneProximityAlertStatus = "Chưa có số đo LiDAR mới."
         detections = []
         answer = ""
     }
 
     func speakAnswer(_ text: String) {
+        speakOnPhone(text, isAnswer: true, isProximityAlert: false)
+    }
+
+    var phoneDetectorStatusMessage: String {
+        switch phoneDetectorReady {
+        case true:
+            let model = phoneDetectorModel.map { " (\($0))" } ?? ""
+            return "YOLO\(model) chạy trên Flask cho prototype camera iPhone; đây không phải model ESP32. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
+        case false:
+            return "YOLO server trên Flask chưa sẵn sàng cho prototype camera iPhone. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
+        case nil:
+            return "Chưa xác minh YOLO server cho prototype camera iPhone. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
+        }
+    }
+
+    private func speakOnPhone(_ text: String, isAnswer: Bool, isProximityAlert: Bool) {
         stopSpeakingAnswer()
         let cleanedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanedText.isEmpty else { return }
@@ -261,7 +371,10 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             try audioSession.setActive(true)
             speechSessionActive = true
         } catch {
-            speechError = "Không mở được âm thanh trên iPhone: \(error.localizedDescription)"
+            speechError = "Không mở được âm thanh trên iPhone. Kiểm tra âm lượng hoặc thiết bị phát rồi thử lại."
+            if isProximityAlert {
+                phoneProximityAlertStatus = "Không phát được cảnh báo qua loa iPhone. Thử kiểm tra âm lượng hoặc bật lại cảnh báo."
+            }
             deactivateSpeechSession()
             return
         }
@@ -269,7 +382,8 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         let utterance = AVSpeechUtterance(string: cleanedText)
         utterance.voice = AVSpeechSynthesisVoice(language: "vi-VN")
         activeSpeechUtteranceID = ObjectIdentifier(utterance)
-        isSpeakingAnswer = true
+        isSpeakingAnswer = isAnswer
+        activeSpeechIsProximityAlert = isProximityAlert
         speechSynthesizer.speak(utterance)
     }
 
@@ -279,6 +393,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         }
         activeSpeechUtteranceID = nil
         isSpeakingAnswer = false
+        activeSpeechIsProximityAlert = false
         deactivateSpeechSession()
     }
 
@@ -306,6 +421,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         guard activeSpeechUtteranceID == utteranceID else { return }
         activeSpeechUtteranceID = nil
         isSpeakingAnswer = false
+        activeSpeechIsProximityAlert = false
         deactivateSpeechSession()
     }
 
@@ -322,7 +438,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         detections = []
         phoneDetectionsCapturedAt = nil
         phoneDetectionsFresh = false
-        status = enabled ? "Đang chờ kết quả YOLO mới…" : "Đã tạm dừng gửi khung hình tới YOLO."
+        status = enabled ? "Đang chờ kết quả YOLO server mới từ Flask…" : "Đã tạm dừng gửi frame iPhone tới YOLO server."
     }
 
     func clearDevicePreview() {
@@ -370,12 +486,156 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         deviceSpeakerMessage = "Đã hủy tác vụ gửi audio khi rời mode ESP32; firmware có thể phát hết PCM đã nhận."
     }
 
+    func sendDeviceControl(command: String, volume: Int? = nil, alertsEnabled: Bool? = nil) async {
+        guard !isSendingDeviceControl else { return }
+        guard deviceCanControl else {
+            deviceControlError = "Điều khiển cần kết nối firmware Wi-Fi trực tiếp; USB bridge chỉ đọc."
+            return
+        }
+
+        var body: [String: Any] = ["command": command]
+        let requestedDescription: String
+        switch command {
+        case "set_volume":
+            guard let volume, (0...100).contains(volume) else {
+                deviceControlError = "Âm lượng phải từ 0 đến 100 phần trăm."
+                return
+            }
+            body["value"] = volume
+            requestedDescription = "mức âm lượng \(volume)%"
+        case "set_alerts":
+            guard let alertsEnabled else {
+                deviceControlError = "Chọn bật hoặc tắt cảnh báo trước khi gửi."
+                return
+            }
+            body["enabled"] = alertsEnabled
+            requestedDescription = "cài đặt \(alertsEnabled ? "bật" : "tắt") cảnh báo"
+        default:
+            deviceControlError = "Firmware hiện chưa hỗ trợ lệnh điều khiển này."
+            return
+        }
+
+        isSendingDeviceControl = true
+        deviceControlMessage = nil
+        deviceControlError = nil
+        defer { isSendingDeviceControl = false }
+        do {
+            let request = try makeRequest(
+                endpoint: "device/command",
+                method: "POST",
+                jsonBody: body
+            )
+            let (data, response) = try await performAuthenticatedRequest(request)
+            let payload = try Self.decode(DeviceControlResponse.self, data: data, response: response)
+            guard payload.command == command,
+                  payload.ack?.type == "command_ack",
+                  payload.ack?.command == command,
+                  payload.ack?.ok == true else {
+                throw APIError.message("Firmware chưa ACK đúng lệnh điều khiển.")
+            }
+            let standbyNote = payload.operationEnabled == false
+                ? " Thiết bị vẫn tạm dừng; lệnh này không bật MODE."
+                : ""
+            deviceControlMessage = "Firmware đã ACK \(requestedDescription). ACK không xác nhận loa hoặc cảnh báo đã hoạt động.\(standbyNote)"
+        } catch {
+            guard !Task.isCancelled else { return }
+            deviceControlError = userFacingErrorMessage(error, fallback: "Không gửi được lệnh tới ESP32. Kiểm tra kết nối Wi-Fi rồi thử lại.")
+        }
+    }
+
     var deviceStatusSnapshot: DeviceStatusPayload? {
         deviceConnection?.status
     }
 
+    var deviceFomoOutputForCurrentFrame: Bool {
+        guard deviceConnection?.transport == "firmware_wifi",
+              deviceConnection?.deviceConnected == true,
+              deviceOperationEnabled == true,
+              let status = deviceStatusSnapshot,
+              status.source == "device",
+              status.detectorModel?.lowercased().hasPrefix("fomo:") == true,
+              status.inferenceStatus == "ok",
+              let frameSequence = deviceFrameSequence,
+              status.resolvedDetectionsFrameSeq == frameSequence,
+              effectiveDeviceAgeMs(status.resolvedDetectionsAgeMs)
+                .map({ $0 <= Self.deviceFrameFreshnessMs }) == true,
+              let bootID = status.deviceHealth?.bootId,
+              status.detectionsBootId == bootID else {
+            return false
+        }
+        return true
+    }
+
+    var deviceFomoStatusMessage: String {
+        guard deviceConnection?.transport == "firmware_wifi" else {
+            return "ESP32 FOMO đang chờ artifact đã huấn luyện và output từ firmware qua Wi-Fi. BLE chỉ mang status, ToF và nút; USB bridge không xác nhận FOMO."
+        }
+        guard let status = deviceStatusSnapshot,
+              status.source == "device" else {
+            return "Đang chờ snapshot firmware có trạng thái FOMO."
+        }
+        let modelID = status.detectorModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard modelID.lowercased().hasPrefix("fomo:") else {
+            return "ESP32-local FOMO đang chờ artifact đã huấn luyện; detector firmware hiện chưa báo model FOMO."
+        }
+        guard status.inferenceStatus == "ok" else {
+            return "Firmware có khai báo model FOMO nhưng chưa báo inference thành công. App chưa hiển thị kết quả."
+        }
+        guard deviceFomoOutputForCurrentFrame else {
+            return "Đang chờ output FOMO mới cùng boot và frame JPEG hiện tại; output cũ hoặc không khớp bị ẩn."
+        }
+        if deviceDetections.isEmpty {
+            return "Firmware FOMO đã xử lý frame \(deviceFrameSequence ?? 0); chưa phát hiện vật thể trong frame này."
+        }
+        return "FOMO ESP32 · frame \(deviceFrameSequence ?? 0) · model \(modelID)."
+    }
+
     var deviceOperationEnabled: Bool? {
         deviceStatusSnapshot?.resolvedOperationEnabled
+    }
+
+    var deviceCanControl: Bool {
+        deviceConnection?.transport == "firmware_wifi"
+            && deviceConnection?.deviceConnected == true
+            && deviceStatusSnapshot?.source == "device"
+            && deviceStatusElapsedMs.map { $0 <= Self.deviceSpeakerStatusFreshnessMs } == true
+    }
+
+    var deviceControlUnavailableMessage: String {
+        guard deviceConnection?.transport == "firmware_wifi" else {
+            return "Kết nối firmware Wi-Fi để mở điều khiển; USB bridge chỉ đọc."
+        }
+        guard deviceConnection?.deviceConnected == true,
+              deviceStatusSnapshot?.source == "device" else {
+            return "Chưa nhận được trạng thái kết nối ESP32 Wi-Fi mới."
+        }
+        guard deviceStatusElapsedMs.map({ $0 <= Self.deviceSpeakerStatusFreshnessMs }) == true else {
+            return "Đang chờ trạng thái ESP32 mới trước khi mở điều khiển."
+        }
+        return "Điều khiển chưa sẵn sàng."
+    }
+
+    var deviceCorridorDecision: DeviceCorridorDecision? {
+        guard deviceConnection?.transport == "firmware_wifi",
+              deviceConnection?.deviceConnected == true,
+              deviceOperationEnabled == true,
+              let status = deviceStatusSnapshot,
+              status.source == "device",
+              status.cameraInputState == "live",
+              let cameraFrame = status.cameraFrame,
+              cameraFrame > 0,
+              effectiveDeviceAgeMs(status.cameraAgeMs).map({ $0 <= Self.deviceFrameFreshnessMs }) == true,
+              effectiveDeviceAgeMs(status.tofAgeMs).map({ $0 <= Self.deviceFrameFreshnessMs }) == true,
+              let bootID = status.deviceHealth?.bootId,
+              status.tofBootId == bootID,
+              let decision = status.corridorDecision,
+              decision.origin == "device",
+              decision.bootId == bootID,
+              decision.frameSeq == cameraFrame,
+              decision.risk.map({ ["clear", "caution", "stop", "unknown"].contains($0) }) == true else {
+            return nil
+        }
+        return status.corridorDecision
     }
 
     var deviceSpeakerReady: Bool {
@@ -513,6 +773,78 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         return "ESP32 đang hoạt động · JPEG \(deviceFrameSequence ?? 0)."
     }
 
+    func receiveBLEButtonEvent(_ event: BLEButtonEvent) {
+        guard event.schemaVersion == "1.0",
+              event.type == "button_event",
+              event.action == "pressed",
+              ["mode", "capture_image", "ask_llm"].contains(event.buttonId),
+              !event.deviceId.isEmpty, !event.bootId.isEmpty,
+              event.pressId > 0,
+              event.ageMs <= 10_000 else {
+            return
+        }
+        let key = deviceButtonEventKey(
+            deviceID: event.deviceId,
+            bootID: event.bootId,
+            pressID: Int(event.pressId)
+        )
+        guard !handledDeviceButtonEventKeys.contains(key),
+              !pendingBLEButtonEvents.contains(where: { $0.event.id == event.id }) else {
+            return
+        }
+
+        pendingBLEButtonEvents.append(PendingBLEButtonEvent(
+            event: event,
+            receivedAtUptime: ProcessInfo.processInfo.systemUptime
+        ))
+        if pendingBLEButtonEvents.count > 64 {
+            pendingBLEButtonEvents.removeFirst(pendingBLEButtonEvents.count - 64)
+        }
+        switch event.buttonId {
+        case "mode":
+            deviceButtonMessage = event.operationEnabled
+                ? "Nhận nút MODE qua Bluetooth; status báo ESP32 đang hoạt động."
+                : "Nhận nút MODE qua Bluetooth; status báo ESP32 đang tạm dừng."
+        case "capture_image":
+            deviceButtonMessage = "Nhận nút chụp qua Bluetooth; cần backend Wi-Fi để lấy JPEG."
+        default:
+            deviceButtonMessage = "Nhận nút hỏi AI qua Bluetooth; cần backend Wi-Fi để lấy frame mới."
+        }
+    }
+
+    func lastHandledBLEPressID(deviceID: String, bootID: String) -> UInt32? {
+        let prefix = "\(deviceID.utf8.count):\(deviceID):\(bootID.utf8.count):\(bootID):"
+        let pressIDs = handledDeviceButtonEventOrder
+            .filter { $0.hasPrefix(prefix) }
+            .compactMap { UInt32(String($0.dropFirst(prefix.count))) }
+        guard var newest = pressIDs.first else { return nil }
+        for pressID in pressIDs.dropFirst() {
+            let delta = pressID &- newest
+            if delta > 0 && delta < 0x8000_0000 {
+                newest = pressID
+            }
+        }
+        return newest
+    }
+
+    private func deviceButtonEventKey(deviceID: String, bootID: String, pressID: Int) -> String {
+        "\(deviceID.utf8.count):\(deviceID):\(bootID.utf8.count):\(bootID):\(pressID)"
+    }
+
+    @discardableResult
+    private func markDeviceButtonEventHandled(deviceID: String, bootID: String, pressID: Int) -> Bool {
+        let eventKey = deviceButtonEventKey(deviceID: deviceID, bootID: bootID, pressID: pressID)
+        guard handledDeviceButtonEventKeys.insert(eventKey).inserted else { return false }
+        handledDeviceButtonEventOrder.append(eventKey)
+        if handledDeviceButtonEventOrder.count > Self.maximumHandledDeviceButtonEvents {
+            let expiredCount = handledDeviceButtonEventOrder.count - Self.maximumHandledDeviceButtonEvents
+            handledDeviceButtonEventOrder.removeFirst(expiredCount)
+            handledDeviceButtonEventKeys = Set(handledDeviceButtonEventOrder)
+        }
+        UserDefaults.standard.set(handledDeviceButtonEventOrder, forKey: Self.handledDeviceButtonEventsDefaultsKey)
+        return true
+    }
+
     private func acceptDeviceButtonEvent(
         from connection: DeviceConnectionPayload,
         sessionGeneration: Int
@@ -522,9 +854,98 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
               let status = connection.status,
               status.source == "device",
               let health = status.deviceHealth,
+              let receivedAt = deviceStatusReceivedAtUptime else {
+            return nil
+        }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        pendingBLEButtonEvents.removeAll {
+            now - $0.receivedAtUptime + Double($0.event.ageMs) / 1000 > 10
+        }
+        let deviceID = health.deviceId ?? ""
+        let bootID = health.bootId ?? ""
+        let mismatchedBLEEvents = pendingBLEButtonEvents.filter {
+            $0.event.deviceId != deviceID || $0.event.bootId != bootID
+        }
+        if !mismatchedBLEEvents.isEmpty {
+            pendingBLEButtonEvents.removeAll {
+                $0.event.deviceId != deviceID || $0.event.bootId != bootID
+            }
+            deviceButtonMessage = "Bỏ qua nút BLE vì device/boot không khớp ESP32 của backend Wi-Fi."
+        }
+
+        var candidates: [(event: DeviceButtonEventPayload, ageMs: Int)] = []
+        if let records = status.buttonEvents, !records.isEmpty {
+            candidates.append(contentsOf: records.map { ($0.event, $0.ageMs) })
+        } else if let event = status.buttonEvent, let eventAge = status.buttonEventAgeMs {
+            candidates.append((event, eventAge))
+        }
+        candidates.append(contentsOf: pendingBLEButtonEvents.map { pending in
+            let elapsed = max(0, now - pending.receivedAtUptime) * 1000
+            return (pending.event.devicePayload, Int(Double(pending.event.ageMs) + elapsed))
+        })
+        candidates.sort { first, second in
+            let firstMatches = first.event.deviceId == deviceID && first.event.bootId == bootID
+            let secondMatches = second.event.deviceId == deviceID && second.event.bootId == bootID
+            if firstMatches != secondMatches { return firstMatches }
+            if firstMatches,
+               let firstPress = first.event.pressId,
+               let secondPress = second.event.pressId,
+               firstPress > 0,
+               firstPress <= Int(UInt32.max),
+               secondPress > 0,
+               secondPress <= Int(UInt32.max) {
+                let firstPressID = UInt32(firstPress)
+                let secondPressID = UInt32(secondPress)
+                let secondAfterFirst = secondPressID &- firstPressID
+                if secondAfterFirst > 0 && secondAfterFirst < 0x8000_0000 {
+                    return true
+                }
+                let firstAfterSecond = firstPressID &- secondPressID
+                if firstAfterSecond > 0 && firstAfterSecond < 0x8000_0000 {
+                    return false
+                }
+            }
+            return first.ageMs > second.ageMs
+        }
+
+        for candidate in candidates {
+            let isBLEEvent = pendingBLEButtonEvents.contains(where: {
+                $0.event.devicePayload.pressId == candidate.event.pressId
+                    && $0.event.devicePayload.deviceId == candidate.event.deviceId
+                    && $0.event.devicePayload.bootId == candidate.event.bootId
+            })
+            let action = acceptDeviceButtonEvent(
+                candidate.event,
+                ageMs: candidate.ageMs,
+                status: status,
+                health: health,
+                sessionGeneration: sessionGeneration,
+                receivedAt: receivedAt
+            )
+            if isBLEEvent {
+                pendingBLEButtonEvents.removeAll {
+                    $0.event.devicePayload.pressId == candidate.event.pressId
+                        && $0.event.devicePayload.deviceId == candidate.event.deviceId
+                        && $0.event.devicePayload.bootId == candidate.event.bootId
+                }
+            }
+            if let action { return action }
+        }
+        return nil
+    }
+
+    private func acceptDeviceButtonEvent(
+        _ event: DeviceButtonEventPayload,
+        ageMs eventAge: Int,
+        status: DeviceStatusPayload,
+        health: DeviceHealthPayload,
+        sessionGeneration: Int,
+        receivedAt: TimeInterval
+    ) -> PendingDeviceButtonAction? {
+        guard sessionGeneration == authenticationGeneration,
               let deviceID = health.deviceId, !deviceID.isEmpty,
               let bootID = health.bootId, !bootID.isEmpty,
-              let event = status.buttonEvent,
               event.type == "button_event",
               event.deviceId == deviceID,
               event.bootId == bootID,
@@ -536,21 +957,11 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
               let pressedAt = event.pressedAtMs, pressedAt >= 0,
               let eventTime = event.tMs, eventTime >= 0,
               let operationEnabled = event.operationEnabled,
-              let eventAge = status.buttonEventAgeMs,
-              (0...10_000).contains(eventAge),
-              let receivedAt = deviceStatusReceivedAtUptime else {
+              (0...10_000).contains(eventAge) else {
             return nil
         }
 
-        let eventKey = "\(deviceID.utf8.count):\(deviceID):\(bootID.utf8.count):\(bootID):\(pressID)"
-        guard handledDeviceButtonEventKeys.insert(eventKey).inserted else { return nil }
-        handledDeviceButtonEventOrder.append(eventKey)
-        if handledDeviceButtonEventOrder.count > Self.maximumHandledDeviceButtonEvents {
-            let expiredCount = handledDeviceButtonEventOrder.count - Self.maximumHandledDeviceButtonEvents
-            handledDeviceButtonEventOrder.removeFirst(expiredCount)
-            handledDeviceButtonEventKeys = Set(handledDeviceButtonEventOrder)
-        }
-        UserDefaults.standard.set(handledDeviceButtonEventOrder, forKey: Self.handledDeviceButtonEventsDefaultsKey)
+        guard markDeviceButtonEventHandled(deviceID: deviceID, bootID: bootID, pressID: pressID) else { return nil }
         deviceCaptureError = nil
         deviceAskError = nil
 
@@ -680,7 +1091,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             deviceButtonMessage = "Đã lưu JPEG mới từ nút chụp · khung \(sequence)."
         } catch {
             if action.authenticationGeneration == authenticationGeneration {
-                deviceCaptureError = error.localizedDescription
+                deviceCaptureError = userFacingErrorMessage(error, fallback: "Không lấy được JPEG mới từ ESP32. Kiểm tra kết nối rồi thử lại.")
                 deviceButtonMessage = "Không chụp được ảnh mới từ nút."
             }
         }
@@ -725,7 +1136,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             guard !Task.isCancelled, generation == authenticationGeneration else { return }
             deviceStatusReceivedAtUptime = nil
             deviceConnection = nil
-            deviceError = error.localizedDescription
+            deviceError = userFacingErrorMessage(error, fallback: "Không kết nối được máy chủ app hoặc ESP32. Kiểm tra Wi-Fi/Flask rồi thử lại.")
             clearDevicePreview()
             return
         }
@@ -771,7 +1182,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         } catch {
             guard !Task.isCancelled else { return }
             clearDevicePreview()
-            deviceError = error.localizedDescription
+            deviceError = userFacingErrorMessage(error, fallback: "Không lấy được JPEG mới từ ESP32. Kiểm tra Wi-Fi/Flask rồi thử lại.")
             if buttonAction?.event.buttonId == "ask_llm" {
                 deviceAskError = "Chưa có JPEG mới khớp frame ESP32; Vision chưa được gọi."
                 deviceButtonMessage = "Nút hỏi AI đã được xử lý nhưng JPEG chưa sẵn sàng."
@@ -853,7 +1264,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             guard generation == authenticationGeneration,
                   speechGeneration == deviceSpeechGeneration,
                   !Task.isCancelled else { return }
-            deviceSpeakerMessage = error.localizedDescription
+            deviceSpeakerMessage = userFacingErrorMessage(error, fallback: "Chưa gửi được audio tới loa ESP32. Kiểm tra kết nối Wi-Fi rồi thử lại.")
         }
     }
 
@@ -922,7 +1333,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         } catch {
             if generation == authenticationGeneration,
                askGeneration == deviceAskGeneration, !Task.isCancelled {
-                deviceAskError = error.localizedDescription
+                deviceAskError = userFacingErrorMessage(error, fallback: "Chưa gửi được câu hỏi tới Vision. Kiểm tra Wi-Fi và trạng thái Vision rồi thử lại.")
                 if buttonAction != nil {
                     deviceButtonMessage = "Yêu cầu Vision cho nút hỏi AI đã kết thúc."
                 }
@@ -939,7 +1350,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         phoneFrameFresh = true
         guard shouldRunYOLO, detectionEnabled, !isDetecting else { return }
         guard !backendBaseURL.isEmpty else {
-            status = "Cần nhập địa chỉ Flask trước khi chạy YOLO."
+            status = "Cần Flask để chạy YOLO server cho prototype camera iPhone."
             detectionEnabled = false
             detections = []
             phoneDetectionsCapturedAt = nil
@@ -950,7 +1361,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         isDetecting = true
         let detectionGeneration = phoneDetectionGeneration
         defer { if modeGeneration == phoneModeGeneration { isDetecting = false } }
-        status = "Đang gửi khung hình sang YOLO…"
+        status = "Đang gửi frame iPhone tới YOLO server trên Flask…"
         do {
             let (data, response) = try await sendImage(endpoint: "detect", image: jpeg)
             guard phoneModeActive,
@@ -972,7 +1383,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             let depthStatus = depth == nil
                 ? "sceneDepth chưa có ở khung này."
                 : "khoảng cách sceneDepth là ước tính."
-            status = "YOLO: \(detections.count) vật thể\(timing) · \(depthStatus)"
+            status = "YOLO server: \(detections.count) vật thể\(timing) · \(depthStatus)"
         } catch {
             if phoneModeActive,
                modeGeneration == phoneModeGeneration,
@@ -981,7 +1392,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
                 detections = []
                 phoneDetectionsCapturedAt = nil
                 phoneDetectionsFresh = false
-                status = error.localizedDescription
+                status = userFacingErrorMessage(error, fallback: "Chưa gửi được frame tới YOLO Flask. Kiểm tra kết nối rồi thử lại.")
             }
         }
     }
@@ -1034,7 +1445,7 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
                modeGeneration == phoneModeGeneration,
                askGeneration == phoneAskGeneration,
                !Task.isCancelled {
-                status = error.localizedDescription
+                status = userFacingErrorMessage(error, fallback: "Chưa gửi được ảnh và câu hỏi tới Vision. Kiểm tra kết nối rồi thử lại.")
             }
         }
     }
@@ -1118,10 +1529,14 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
             let payload = try Self.decode(DeviceCapabilitiesPayload.self, data: data, response: response)
             deviceVisionReady = payload.visionReady
             deviceVisionProvider = payload.visionProvider
+            phoneDetectorReady = payload.detectorReady
+            phoneDetectorModel = payload.detectorModel
         } catch {
             if !Task.isCancelled {
                 deviceVisionReady = nil
                 deviceVisionProvider = nil
+                phoneDetectorReady = nil
+                phoneDetectorModel = nil
             }
         }
     }
@@ -1184,7 +1599,11 @@ final class CameraModel: NSObject, ObservableObject, @preconcurrency AVSpeechSyn
         } ?? false
         let detectionsBootMatches = deviceConnection?.transport != "firmware_wifi"
             || status.detectionsBootId == status.deviceHealth?.bootId
-        if detectionsFresh, detectionsBootMatches,
+        let firmwareFomoOutput = deviceConnection?.transport == "firmware_wifi"
+            && status.source == "device"
+            && status.detectorModel?.lowercased().hasPrefix("fomo:") == true
+            && status.inferenceStatus == "ok"
+        if firmwareFomoOutput, detectionsFresh, detectionsBootMatches,
            status.resolvedDetectionsFrameSeq == frameSequence {
             deviceDetections = status.detections ?? []
         } else {
@@ -1379,6 +1798,35 @@ private enum APIError: LocalizedError {
         switch self {
         case let .message(message), let .authentication(message): return message
         }
+    }
+}
+
+private func userFacingErrorMessage(_ error: Error, fallback: String) -> String {
+    if let apiError = error as? APIError,
+       let message = apiError.errorDescription,
+       !message.isEmpty {
+        return message
+    }
+
+    let urlErrorCode: URLError.Code?
+    if let urlError = error as? URLError {
+        urlErrorCode = urlError.code
+    } else {
+        let nsError = error as NSError
+        urlErrorCode = nsError.domain == NSURLErrorDomain
+            ? URLError.Code(rawValue: nsError.code)
+            : nil
+    }
+
+    switch urlErrorCode {
+    case .some(.timedOut):
+        return "Máy chủ trả lời quá lâu. Kiểm tra kết nối rồi thử lại nhé."
+    case .some(.notConnectedToInternet), .some(.networkConnectionLost), .some(.cannotFindHost), .some(.cannotConnectToHost), .some(.dnsLookupFailed):
+        return "Không kết nối được máy chủ app. Kiểm tra Wi-Fi/Flask rồi thử lại nhé."
+    case .some:
+        return fallback
+    case .none:
+        return fallback
     }
 }
 

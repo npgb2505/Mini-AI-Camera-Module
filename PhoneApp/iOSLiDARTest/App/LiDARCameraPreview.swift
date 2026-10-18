@@ -21,12 +21,14 @@ struct LiDARCameraPreview: UIViewRepresentable {
         view.session.delegateQueue = DispatchQueue(label: "vn.khiemthi.rosight.arsession")
 
         guard ARWorldTrackingConfiguration.isSupported else {
+            model.updatePhoneSceneDepthSupport(false)
             model.updateCameraStatus("ARKit camera không được hỗ trợ trên thiết bị này; chưa có ảnh hoặc khoảng cách.")
             return view
         }
 
         let configuration = ARWorldTrackingConfiguration()
         let sceneDepthSupported = ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
+        model.updatePhoneSceneDepthSupport(sceneDepthSupported)
         if sceneDepthSupported {
             configuration.frameSemantics = ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth)
                 ? [.sceneDepth, .smoothedSceneDepth]
@@ -118,7 +120,7 @@ struct LiDARCameraPreview: UIViewRepresentable {
 
         func session(_ session: ARSession, didFailWithError error: Error) {
             Task { @MainActor [weak model] in
-                model?.updateCameraStatus("Camera/LiDAR lỗi: \(error.localizedDescription)")
+                model?.updateCameraStatus("ARKit không mở được camera hoặc LiDAR. Kiểm tra quyền camera rồi mở lại chế độ iPhone.")
             }
         }
 

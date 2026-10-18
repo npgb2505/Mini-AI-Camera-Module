@@ -1,42 +1,81 @@
-# Cài thử Ro Sight miễn phí trên iPhone
+# Cài và thử Ro Sight miễn phí trên iPhone, không cần Mac
 
-Tài liệu này hướng dẫn cài bản native thử nghiệm từ IPA unsigned bằng Windows
-và AltServer. App chưa phát hành trên App Store; IPA phải được ký lại bằng
-Apple Account của người cài. Cần tải IPA từ artifact GitHub Actions trước khi
-bắt đầu.
+Cần máy Windows để chạy backend/AltServer, iPhone, Internet và Apple Account
+miễn phí. Không cần sở hữu Mac. **PWA là đường thử ngay**; native cần một IPA
+được build trên runner macOS của GitHub Actions rồi ký trên Windows trước khi
+cài.
 
-**Tình trạng hiện tại (12/10/2026):** Workflow iOS mới có trong branch local;
-GitHub hiện chưa có workflow hoặc lượt chạy nên chưa có IPA để tải. Chỉ tiếp
-tục hướng dẫn cài bên dưới sau khi workflow được đưa lên GitHub và có một lượt
-Actions thành công. Muốn chạy thủ công, workflow cũng phải có trên branch mặc
-định của repo.
+**Tình trạng ngày 18/10/2026:** workflow `Build iOS test IPA` hiện chỉ có trong
+branch local; upstream chưa có branch, workflow hoặc IPA. Tài khoản GitHub hiện
+báo quyền `READ`; kiểm tra push dry-run không tương tác bị từ chối vì thiếu
+quyền ghi. Không có push hoặc dispatch thật nào được thực hiện. Để tạo IPA,
+branch app và workflow cần được đưa lên repo mà tài khoản hiện tại có quyền ghi
+và Actions được phép chạy; hướng dẫn bên dưới mô tả các bước sau đó.
 
-## Chọn bản PWA hay native
+## Chọn đường thử
 
-- **PWA:** miễn phí, không cần ký app. Chạy server trên máy tính, mở URL HTTPS
-  tạm thời trong Safari iPhone rồi chọn **Chia sẻ → Thêm vào Màn hình chính**.
-  PWA dùng camera iPhone nhưng không đọc được ARKit `sceneDepth`; xem hướng dẫn
-  chạy điện thoại trong [README của PWA](../../../04_App/ro-app/README.md).
-- **Native:** có thể dùng ARKit sceneDepth trên iPhone hỗ trợ, bên cạnh chế độ
-  kết nối ESP32. Nếu camera ARKit chạy nhưng sceneDepth không được hỗ trợ, app
-  vẫn có thể dùng frame iPhone cho YOLO/hỏi ảnh nhưng không hiện khoảng cách.
-  Bản native là app thử nghiệm, không phải bản phát hành.
+| | Native iPhone app | PWA trong Safari |
+| --- | --- | --- |
+| Yêu cầu iOS | iOS 16 trở lên | Safari iOS hiện hành |
+| Camera iPhone | Có, chỉ mở ở mode **Chỉ dùng iPhone** | Có, khi mở qua HTTPS và cho phép Camera |
+| Khoảng cách LiDAR | ARKit `sceneDepth` khi runtime hỗ trợ; iPhone 12 Pro/12 Pro Max có LiDAR | Không có ARKit/sceneDepth. Khoảng cách luôn “chưa khả dụng”; không ước lượng mét từ ảnh |
+| Mic câu hỏi | Mic iPhone qua Dictation bàn phím; native gửi text, không thu audio | Dictation bàn phím hoặc ghi âm Safari tới API phiên âm khi backend bật |
+| ESP32 | BLE discovery/status/ToF/nút; FOMO cục bộ đang chờ artifact; Wi‑Fi/Flask lấy JPEG, FOMO snapshot và gọi Vision | Flask qua Wi‑Fi firmware hoặc USB bridge; không dùng BLE |
+| Đọc câu trả lời | `AVSpeechSynthesizer` trên iPhone | `speechSynthesis` của trình duyệt |
 
-## 1. Lấy IPA từ GitHub Actions
+Ở ESP32 mode, nút **MODE** trên board bật/tắt operation và app phản ánh trạng
+thái; **CHỤP** lấy JPEG mới nhưng không gọi Vision; **HỎI AI** lấy frame/context
+mới rồi gửi đúng một yêu cầu Vision. BLE chỉ mang sự kiện/trạng thái và lệnh
+replay cursor; không có lệnh bật MODE/chụp/hỏi từ xa. Nếu backend Wi‑Fi/Flask
+không lấy được ảnh mới thì chụp/hỏi không hoàn tất. Firmware source hiện có
+GATT server và ring replay 64 event/10 giây, nhưng `sdkconfig` checked-in vẫn
+tắt Bluetooth. Completion GATT hiện báo `history_truncated`, `oldest_press_id`
+và `latest_press_id`; app cảnh báo nếu lịch sử thiếu và không xác nhận đủ khi
+metadata không hợp lệ. Firmware bỏ ID 0 dành riêng và chuyển từ
+`4294967295` sang `1`; parser, cursor và thứ tự event native dùng uint32
+serial arithmetic. GPIO nút cũng chưa được xác minh, nên chưa có bằng chứng ba
+nút vật lý đang hoạt động trên board.
 
-1. Sau khi workflow đã có trên GitHub, mở repo `bartsil/Mini-AI-Camera-Module`
-   và chọn **Actions**. Nếu workflow mới chỉ nằm trong branch app, chưa có run
-   nào trên GitHub; workflow thủ công cần có trên branch mặc định trước.
-2. Mở lần chạy thành công của workflow **Build iOS test IPA** trên branch app.
-   Workflow tự chạy khi có push thay đổi trong `PhoneApp/iOSLiDARTest/` hoặc
-   file workflow.
-3. Trong mục **Artifacts**, tải `RoSight-unsigned-ipa` rồi giải nén để lấy
-   `RoSight-unsigned.ipa`.
+YOLO chạy trên máy tính chỉ là prototype riêng cho camera iPhone. ESP32 không
+dùng YOLO server thay cho model của nó. Khi có artifact FOMO đã huấn luyện,
+firmware sẽ phát `detections` qua WebSocket Wi‑Fi; Flask đưa model, trạng thái
+inference, boot/frame và tuổi dữ liệu vào `/api/device/status`. App chỉ hiện
+FOMO khi `model_id` bắt đầu bằng `fomo:`, `inference_status` là `ok`, và output
+cùng boot/frame JPEG còn mới. BLE không mang detections; BLE giữ discovery,
+status, ToF và ba nút.
 
-Artifact được lưu ba ngày. Nếu không thấy, workflow chưa chạy thành công hoặc
-artifact đã hết hạn; chạy lại workflow sau khi source có trên GitHub.
+GATT characteristic hiện không yêu cầu mã hóa hoặc xác thực BLE. App mở kết
+nối CoreBluetooth và xác minh identity/status theo protocol; đây chưa phải ghép
+cặp bảo mật ở tầng BLE. Không gửi bí mật hoặc lệnh nhạy cảm qua link này.
 
-## 2. Cài AltServer trên Windows
+Trong native app, chỉ hiện BLE v1 **LIVE** khi `device_info` và `status` cùng
+schema `1.0`, đúng cả `device_id`/`boot_id`, `seq` và `t_ms` tiến lên với so
+sánh uint32 wrap-safe, hai notification đang bật và status còn mới không quá
+một giây tính từ fragment BLE đầu tiên. Có link Bluetooth nhưng sai phiên
+hoặc status cũ thì vẫn là “đang xác minh”, không được xem là đã kết nối; ToF
+và sự kiện nút cũ cũng bị ẩn/bỏ. PWA không dùng BLE.
+
+## 1. PWA Safari: đường miễn phí và nhanh nhất
+
+1. Trên Windows, cài/chạy dependencies theo [README của PWA](../../../04_App/ro-app/README.md), khởi động backend bằng `run.ps1`, rồi chạy `start_phone.ps1` trong cửa sổ khác.
+2. Script mở Cloudflare Quick Tunnel HTTPS tạm thời. Mở URL và thông tin đăng nhập được in ra bằng Safari trên iPhone, tạo hồ sơ rồi chọn **Chia sẻ → Thêm vào Màn hình chính** nếu muốn có icon.
+3. Cho Safari quyền Camera. Dùng mic Dictation của bàn phím để nhập câu hỏi; nút ghi âm trong PWA chỉ hoạt động khi backend có API phiên âm. Câu trả lời có thể đọc qua loa iPhone.
+4. Trang chính nói rõ Safari PWA không có LiDAR/ARKit `sceneDepth`; khoảng cách phone-only sẽ luôn chưa khả dụng. ESP32 trong PWA đi qua Flask/Wi‑Fi hoặc USB bridge, không phải BLE.
+
+PWA không cần IPA, chứng chỉ ký hay Apple Developer Program. Quick Tunnel là dịch vụ bên ngoài: trang, API, ảnh và khung hình stream đi qua Cloudflare. Chỉ dùng tunnel tạm cho thử nghiệm; xem README để biết giới hạn quyền riêng tư và cách cấu hình backend.
+
+## 2. Native: build cloud miễn phí, ký trên Windows
+
+### Chuẩn bị một workflow IPA
+
+1. Dùng GitHub repo mà bạn có quyền ghi, hoặc nhờ chủ repo cấp quyền trước. Nếu tự chọn một fork/repo khác, bạn tự tạo và đưa `PhoneApp/iOSLiDARTest/**` cùng `.github/workflows/ios-lidar-test.yml` lên đó; hướng dẫn này không tạo repo hay push mã thay bạn. Chỉ chọn file app/workflow cần build; working tree local hiện có thay đổi KiCad riêng, không đưa chúng vào upload native.
+2. Workflow phải có trên branch mặc định để GitHub cho chạy `workflow_dispatch`. Tại **Settings → Actions**, cho phép workflow nếu repo đang tắt Actions.
+3. iOS native cần Xcode trên macOS; Windows hiện tại không có `xcodebuild`/Swift iOS SDK. Bạn có thể dùng standard GitHub-hosted macOS runner mà không cần sở hữu Mac. Runner chuẩn miễn phí, không giới hạn cho repo công khai; repo riêng dùng quota plan và có thể phát sinh phí vượt quota. Xem [runner GitHub-hosted](https://docs.github.com/en/actions/reference/runners/github-hosted-runners), [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions) và [yêu cầu Xcode của Apple](https://developer.apple.com/xcode/system-requirements/) trước khi bật. Workflow này dùng runner `macos-15`.
+4. Chọn **Actions → Build iOS test IPA → Run workflow**, chọn branch app cần build, chờ job xanh rồi tải artifact `RoSight-unsigned-ipa`. Giải nén để lấy `RoSight-unsigned.ipa`. Artifact hiện được workflow giữ ba ngày.
+
+Workflow build **unsigned**. Build PASS chỉ tạo gói cài, không chứng minh camera, ARKit, mic, BLE hoặc ESP32 chạy thật. Nếu không có quyền đưa branch/workflow lên một repo GitHub và chạy Actions, đường native hiện chưa dùng được; dùng PWA để thử app ngay.
+
+### Cài AltServer trên Windows
 
 1. Làm theo [hướng dẫn AltStore Classic cho Windows](https://faq.altstore.io/altstore-classic/how-to-install-altstore-windows).
    Cài iTunes và iCloud bằng bộ cài tải từ Apple, không dùng gói Microsoft
@@ -55,9 +94,13 @@ artifact đã hết hạn; chạy lại workflow sau khi source có trên GitHub
    và xác nhận **Trust**.
 
 AltStore Classic dùng được qua AltServer. AltStore PAL là phương án phân phối
-theo khu vực và không phải đường cài được mô tả ở đây.
+theo khu vực và không phải đường cài được mô tả ở đây. IPA cài trực tiếp qua
+AltServer cần cài lại sau mỗi 7 ngày; có thể sideload tối đa ba app miễn phí
+đang hoạt động theo giới hạn iOS/AltStore. Xem [quy tắc refresh của
+AltStore](https://faq.altstore.io/altstore-classic/your-altstore) và
+[sideload IPA trực tiếp](https://faq.altstore.io/release-notes/altserver).
 
-## 3. Kết nối app với backend
+### Kết nối app với backend
 
 Mở Ro Sight, vào phần thiết lập và nhập URL Flask backend cùng tài khoản Ro
 Sight. `127.0.0.1` trên iPhone trỏ về chính iPhone, nên hãy dùng địa chỉ máy
@@ -76,20 +119,27 @@ firmware Wi-Fi trực tiếp trả status mới, `audio_ok=true` và
 chưa được xác minh nên firmware giữ đầu ra bị khóa. App không dùng microphone
 ESP32 và status firmware không xác nhận có âm thanh nghe được.
 
-## Mic và giới hạn bản thử
+Màn **Kết nối ESP32** cũng có thẻ fusion frame/ToF và điều khiển âm lượng hoặc
+bật/tắt cảnh báo. Chúng chỉ gửi qua firmware Wi-Fi trực tiếp; USB bridge chỉ
+đọc. Fusion chuyển thành `unknown` nếu frame, ToF, phiên boot hoặc event cũ.
+Firmware chỉ hỗ trợ `set_volume` và `set_alerts`; ACK xác nhận nhận lệnh, không
+xác nhận có tiếng hay cảnh báo thật, và không bật MODE.
 
-- Muốn hỏi bằng giọng nói, chạm vào ô câu hỏi rồi dùng mic **Dictation** trên
-  bàn phím iPhone. Người dùng tự chọn khi nào bật Dictation. App native không
-  thu âm nền, không xin quyền microphone và chỉ gửi phần văn bản đã nhập tới
-  backend. Cách iOS xử lý Dictation phụ thuộc cài đặt của iPhone.
+### Mic, hỏi API/LLM và đọc câu trả lời
+
+- **Native:** chạm ô câu hỏi rồi chạm mic **Dictation** trên bàn phím iPhone.
+  iOS chuyển lời nói thành text; app gửi text và ảnh mới tới Flask
+  (`/api/analyze` ở phone-only, `/api/device/ask` ở ESP32). App không thu audio
+  câu hỏi và không xin quyền microphone riêng. Câu trả lời đọc trên iPhone bằng
+  `AVSpeechSynthesizer`; ở ESP32 mode, phát qua loa ESP32 là lựa chọn khác và
+  cần firmware Wi-Fi hỗ trợ.
 - PWA có thêm tùy chọn ghi âm trong app khi backend đã cấu hình API phiên âm;
-  nếu không, dùng Dictation của iPhone. PWA cần Safari qua HTTPS để truy cập
-  camera/microphone.
-- Với Apple Account miễn phí, app sideload hết hạn sau bảy ngày. IPA cài trực
-  tiếp bằng AltServer cần được cài lại định kỳ bằng cùng máy tính và AltServer.
-  Apple giới hạn tối đa ba app sideload đang hoạt động trên thiết
-  bị cho tài khoản miễn phí; [FAQ AltStore](https://faq.altstore.io/altstore-classic/your-altstore)
-  mô tả gia hạn và giới hạn này.
+  nếu không, dùng Dictation trên bàn phím iPhone. PWA cần Safari qua HTTPS để
+  truy cập camera/microphone và dùng `speechSynthesis` để đọc câu trả lời.
+- Câu hỏi gửi tới máy chủ Ro Sight. YOLO server chỉ là prototype riêng cho
+  camera iPhone; ESP32 cần FOMO cục bộ sau khi có artifact đã huấn luyện. Vision
+  có thể chạy cục bộ nếu backend được cấu hình model local; nếu chọn dịch vụ API
+  bên ngoài, phí phụ thuộc nhà cung cấp và tài khoản của bạn.
 - IPA từ workflow là **unsigned**; bước cài qua AltServer mới ký cho tài khoản
   và thiết bị của bạn. Build hoặc cài được app không xác nhận LiDAR chính xác,
   hành vi camera/micro, kết nối ESP32 hay độ an toàn khi di chuyển. Cần thử
