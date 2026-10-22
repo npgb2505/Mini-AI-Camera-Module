@@ -222,13 +222,13 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             return PhonePathSummary(
                 title: "Có vật phía xa",
                 detail: "Vật ngoài tầm thử 2,5 m chỉ để tham khảo, chưa tính là chặn đoạn đường gần.",
-                tint: .mint
+                tint: .white
             )
         }
         return PhonePathSummary(
             title: "Chưa thấy vật trong hành lang gần",
             detail: "Không phát hiện vật cản trong vùng thử đến 2,5 m ở frame này; điều đó chưa chứng minh đường trống.",
-            tint: .mint
+            tint: .white
         )
     }
 
@@ -237,7 +237,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         if detections.contains(where: { $0.pathAssessment == .immediateCandidate }) { return .red }
         if detections.contains(where: { $0.pathAssessment == .nearCandidate }) { return .orange }
         if detections.contains(where: { $0.pathAssessment == .unknownDistance }) { return .yellow }
-        return .mint
+        return .white
     }
 
     override init() {
