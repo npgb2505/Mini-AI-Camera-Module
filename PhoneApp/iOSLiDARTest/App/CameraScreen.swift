@@ -9,9 +9,9 @@ private enum RoSightMode: Equatable {
 struct CameraScreen: View {
     @StateObject private var model = CameraModel()
     @StateObject private var bluetoothTransport = BLEDeviceTransport()
-    @AppStorage("roSight.backendURL") private var backendURL = ""
+    @AppStorage("roSight.backendURL") private var backendURL = "https://ro-mobile-assistant.airy-clave.workers.dev"
+    @AppStorage("roSight.accountUsername") private var accountUsername = ""
     @AppStorage("roSight.phoneProximityAlertsEnabled") private var phoneProximityAlertsEnabled = true
-    @State private var accountUsername = ""
     @State private var accountPassword = ""
     @State private var accessUsername = ""
     @State private var accessPassword = ""
@@ -19,6 +19,8 @@ struct CameraScreen: View {
     @State private var deviceQuestion = ""
     @State private var selectedMode: RoSightMode?
     @State private var showSettings = false
+    @State private var showCredentialError = false
+    @State private var credentialError = ""
     @State private var phoneAskTask: Task<Void, Never>?
     @State private var deviceAskTask: Task<Void, Never>?
     @State private var deviceControlTask: Task<Void, Never>?
@@ -43,6 +45,17 @@ struct CameraScreen: View {
                 accessUsername: $accessUsername,
                 accessPassword: $accessPassword
             ) {
+                do {
+                    if accountPassword.isEmpty {
+                        try AccountCredentialStore.deletePassword()
+                    } else {
+                        try AccountCredentialStore.savePassword(accountPassword)
+                    }
+                } catch {
+                    credentialError = error.localizedDescription
+                    showCredentialError = true
+                    return
+                }
                 deviceSpeechTask?.cancel()
                 deviceSpeechTask = nil
                 model.cancelDeviceSpeech()
@@ -59,7 +72,15 @@ struct CameraScreen: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        .alert("Không lưu được mật khẩu", isPresented: $showCredentialError) {
+            Button("Đóng", role: .cancel) { }
+        } message: {
+            Text(credentialError)
+        }
         .onAppear {
+            if accountPassword.isEmpty {
+                accountPassword = AccountCredentialStore.loadPassword() ?? ""
+            }
             let cameraModel = model
             bluetoothTransport.onButtonEvent = { event in
                 cameraModel.receiveBLEButtonEvent(event)
@@ -182,6 +203,9 @@ struct CameraScreen: View {
                 endPoint: .bottom
             )
             .ignoresSafeArea()
+
+            WalkingCorridorOverlay(tint: model.phoneCorridorTint)
+                .ignoresSafeArea()
 
             VStack(spacing: 14) {
                 phoneHeader
@@ -419,6 +443,26 @@ struct CameraScreen: View {
                 Text(model.detectionEnabled ? "Đang chờ detector xử lý frame iPhone mới." : "Bật nhận diện server cho camera iPhone; kết quả cũ sẽ tự ẩn.")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.55))
+            }
+
+            if let summary = model.phonePathSummary {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(summary.title)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(summary.tint)
+                    Text(summary.detail)
+                        .font(.system(size: 10, weight: .regular, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(summary.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(summary.tint.opacity(0.25), lineWidth: 1)
+                }
+                .accessibilityElement(children: .combine)
             }
 
             if model.phoneDetectionsFresh, !model.phoneHazardZones.isEmpty {
@@ -1062,6 +1106,46 @@ struct CameraScreen: View {
     }
 }
 
+private struct WalkingCorridorOverlay: View {
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                WalkingCorridorShape()
+                    .fill(tint.opacity(0.10))
+                WalkingCorridorShape()
+                    .stroke(tint.opacity(0.82), style: StrokeStyle(lineWidth: 2, dash: [9, 7]))
+                Path { path in
+                    let x = proxy.size.width * 0.5
+                    path.move(to: CGPoint(x: x, y: proxy.size.height * 0.26))
+                    path.addLine(to: CGPoint(x: x, y: proxy.size.height * 0.96))
+                }
+                .stroke(tint.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 8]))
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct WalkingCorridorShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let farY = rect.minY + rect.height * 0.25
+        let nearY = rect.minY + rect.height
+        let farHalfWidth = rect.width * 0.12
+        let nearHalfWidth = rect.width * 0.34
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX - farHalfWidth, y: farY))
+        path.addLine(to: CGPoint(x: rect.midX + farHalfWidth, y: farY))
+        path.addLine(to: CGPoint(x: rect.midX + nearHalfWidth, y: nearY))
+        path.addLine(to: CGPoint(x: rect.midX - nearHalfWidth, y: nearY))
+        path.closeSubpath()
+        return path
+    }
+}
+
 private struct BLEDevicePanel: View {
     @ObservedObject var transport: BLEDeviceTransport
 
@@ -1309,8 +1393,11 @@ private struct BackendSettingsSheet: View {
                     TextField("Tên đăng nhập app", text: $accountUsername)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    SecureField("Mật khẩu tài khoản (chỉ giữ trong phiên này)", text: $accountPassword)
+                    SecureField("Mật khẩu tài khoản", text: $accountPassword)
                 }
+                Text("Tên đăng nhập được lưu trong cài đặt app; mật khẩu được lưu trong iOS Keychain trên iPhone này.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 Section("Basic Auth của tunnel (nếu có)") {
                     TextField("Tên đăng nhập tunnel", text: $accessUsername)
                         .textInputAutocapitalization(.never)

@@ -12,6 +12,12 @@ struct FusedDetection: Identifiable {
     let pathAssessment: DetectionPathAssessment
 }
 
+struct PhonePathSummary {
+    let title: String
+    let detail: String
+    let tint: Color
+}
+
 enum DetectionPathAssessment {
     case immediateCandidate
     case nearCandidate
@@ -187,6 +193,52 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     static let phoneProximityAlertThresholdMeters = 0.8
     static let phoneProximityResetThresholdMeters = 1.05
     static let phoneNavigationHorizonMeters = 2.5
+
+    var phonePathSummary: PhonePathSummary? {
+        guard phoneDetectionsFresh else { return nil }
+        if detections.contains(where: { $0.pathAssessment == .immediateCandidate }) {
+            return PhonePathSummary(
+                title: "Có vật thể rất gần trong hành lang",
+                detail: "Có phát hiện ước tính trong khoảng 0,8 m. Số đo cần được kiểm tra thực tế.",
+                tint: .red
+            )
+        }
+        if let item = detections.first(where: { $0.pathAssessment == .nearCandidate }) {
+            let distance = item.distanceMeters.map { String(format: "%.1f", $0) } ?? ""
+            return PhonePathSummary(
+                title: "Có vật thể trong tầm hành lang gần",
+                detail: "Ước tính khoảng \(distance) m, trong tầm thử đến 2,5 m. App chưa xác nhận đường an toàn.",
+                tint: .orange
+            )
+        }
+        if detections.contains(where: { $0.pathAssessment == .unknownDistance }) {
+            return PhonePathSummary(
+                title: "Có vật trong vùng đi, chưa rõ khoảng cách",
+                detail: "LiDAR chưa có số đo đủ tin cậy; không xem trạng thái này là đường trống.",
+                tint: .yellow
+            )
+        }
+        if detections.contains(where: { $0.pathAssessment == .farContext }) {
+            return PhonePathSummary(
+                title: "Có vật phía xa",
+                detail: "Vật ngoài tầm thử 2,5 m chỉ để tham khảo, chưa tính là chặn đoạn đường gần.",
+                tint: .mint
+            )
+        }
+        return PhonePathSummary(
+            title: "Chưa thấy vật trong hành lang gần",
+            detail: "Không phát hiện vật cản trong vùng thử đến 2,5 m ở frame này; điều đó chưa chứng minh đường trống.",
+            tint: .mint
+        )
+    }
+
+    var phoneCorridorTint: Color {
+        guard phoneDetectionsFresh else { return .mint }
+        if detections.contains(where: { $0.pathAssessment == .immediateCandidate }) { return .red }
+        if detections.contains(where: { $0.pathAssessment == .nearCandidate }) { return .orange }
+        if detections.contains(where: { $0.pathAssessment == .unknownDistance }) { return .yellow }
+        return .mint
+    }
 
     override init() {
         let savedButtonEvents = Array(
@@ -1557,8 +1609,11 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         guard bottom >= minimumPathY else { return .outsideCorridor }
         let nearFactor = min(1, max(0, (bottom - minimumPathY) / (1 - minimumPathY)))
         let halfWidth = 0.12 + 0.22 * nearFactor
-        let contactX = (left + right) / 2
-        guard abs(contactX - 0.5) <= halfWidth else { return .outsideCorridor }
+        let corridorLeft = 0.5 - halfWidth
+        let corridorRight = 0.5 + halfWidth
+        // A wide object may block the corridor even when its center lies
+        // outside it, so test the box's horizontal overlap at its ground edge.
+        guard right >= corridorLeft, left <= corridorRight else { return .outsideCorridor }
 
         guard let distanceMeters,
               distanceMeters.isFinite,
