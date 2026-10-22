@@ -198,12 +198,17 @@ or unavailable and Whisper is ready. This is turn-taking, not full-duplex. Raw
 microphone streaming is disclosed by the permission prompt and voice-screen
 privacy text. The Worker does not store audio or camera frames in D1.
 
-The realtime client is present but currently not exercised against a working
-cloud endpoint. The source Worker gates it behind
-`CF_VOICE_REALTIME_VI_CONFIRMED=true`; keep this false until Vietnamese
-streaming has been confirmed for the configured Cloudflare Gateway. The
-previous temporary `workers.dev` preview is unavailable and Wrangler is not
-authenticated on the current Windows environment.
+The current preview is a temporary Cloudflare account at
+`https://ro-mobile-assistant-preview.diamond-fold.workers.dev`; claim it within
+60 minutes to retain the Worker and D1. Its status endpoint currently reports
+Qwen 3.8 27B, Moondream 3.1, and Whisper Large v3 Turbo as ready. A live test on
+a Simulator screenshot returned a Qwen vision answer in 6.6 seconds. A text
+voice turn streamed its first Qwen delta in 1.7 seconds and completed in 2.4
+seconds. These are single preview measurements, not iPhone microphone latency.
+The native app's default URL has been switched to this preview and migrates the
+old dead URL on launch. Nova-3 microphone streaming remains disabled until
+Vietnamese streaming is confirmed for the configured Cloudflare Gateway; native
+voice currently uses iOS Speech followed by streamed Qwen.
 Safari's PWA also supports voice, but cannot read ARKit depth, so the native app
 is the path that pairs vision boxes with sceneDepth from the same camera frame.
 

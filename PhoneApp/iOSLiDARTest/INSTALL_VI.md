@@ -5,13 +5,17 @@ miễn phí. Không cần sở hữu Mac. **PWA là đường thử ngay**; nati
 được build trên runner macOS của GitHub Actions rồi ký trên Windows trước khi
 cài.
 
-**Tình trạng ngày 23/10/2026:** Worker preview Cloudflare cũ hiện không còn
-truy cập được; DNS trả `100::`, HTTPS status request thất bại và Wrangler
-chưa đăng nhập. Các model Qwen 3.8 27B, Moondream 3.1 và Whisper Large v3 Turbo
-đã chạy trên deployment trước đó, nhưng trạng thái cloud hiện chưa xác minh.
-Native app có iOS Speech fallback và client WebSocket cloud; Worker bật
-`voice_realtime_ready` mới được phép stream mic PCM. Nova-3 tiếng Việt realtime
-vẫn bị khóa tới khi kiểm thử trực tiếp xác nhận hỗ trợ.
+**Tình trạng ngày 23/10/2026:** Đã dựng lại preview tạm tại
+`https://ro-mobile-assistant-preview.diamond-fold.workers.dev`. Worker và D1
+đang hoạt động; claim tài khoản trong 60 phút để giữ lại dịch vụ và dữ liệu.
+`/api/status` báo Qwen 3.8 27B, Moondream 3.1, Whisper Large v3 Turbo sẵn sàng.
+Thử inference thật với ảnh Simulator: Qwen Vision trả lời trong 6,6 giây.
+Thử lượt thoại text qua SSE: token Qwen đầu tiên sau 1,7 giây, hoàn tất sau
+2,4 giây. Đây chưa phải phép đo mic trên iPhone thật.
+
+App mặc định đã chuyển sang URL preview mới và tự cập nhật URL cũ đã lưu.
+Native voice dùng Speech của iPhone rồi stream câu trả lời Qwen; WebSocket
+Nova-3 gửi mic PCM vẫn tắt tới khi xác nhận streaming tiếng Việt trên Gateway.
 
 Native app có hành lang hình thang phủ lên camera, chỉ tính vật giao với vùng
 giữa và nằm trong tầm thử 2,5 m; vật xa hơn chỉ là ngữ cảnh. Địa chỉ cloud được
