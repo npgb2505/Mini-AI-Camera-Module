@@ -100,6 +100,14 @@ Workflow build **unsigned**. Build PASS tạo gói cài, nhưng chưa chứng mi
 
 ### Cài AltServer trên Windows
 
+**Chẩn đoán PC ngày 23/10/2026:** Windows có Apple Devices, iTunes và iCloud
+bản Microsoft Store, nhưng hiện không có dịch vụ Apple Mobile Device và không
+liệt kê iPhone như thiết bị USB. AltServer vì thế chưa có đường USB để nhận
+điện thoại. AltStore Classic hướng dẫn cài iTunes và iCloud desktop trực tiếp
+từ Apple, sau đó mở khóa iPhone, chọn **Trust This Computer** và chạy AltServer
+bằng quyền Administrator. Xem [hướng dẫn Windows của AltStore](https://faq.altstore.io/altstore-classic/how-to-install-altstore-windows)
+và [khắc phục iPhone không được nhận diện của Apple](https://support.apple.com/en-ie/102347).
+
 1. Làm theo [hướng dẫn AltStore Classic cho Windows](https://faq.altstore.io/altstore-classic/how-to-install-altstore-windows).
    Cài iTunes và iCloud bằng bộ cài tải từ Apple, không dùng gói Microsoft
    Store; cài AltServer for Windows và chạy AltServer bằng quyền Administrator.
