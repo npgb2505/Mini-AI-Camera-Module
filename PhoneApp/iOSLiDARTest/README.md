@@ -173,11 +173,13 @@ one second without a newer depth update.
 ### Cloudflare phone backend
 
 The native **Chỉ dùng iPhone** mode can use the Cloudflare Worker preview for
-cloud detection and image questions while ARKit supplies depth locally. First
-create a Ro Sight account in the HTTPS PWA using the registration code supplied
-with the preview. In native settings, enter the Worker base URL and the same
-username/password; leave the optional tunnel Basic Auth fields blank. Select
-**Chỉ dùng iPhone**. The app logs into `/api/auth/login`, reads `/api/status`,
+cloud detection and image questions while ARKit supplies depth locally. The
+current preview URL is prefilled in native settings. First create a Ro Sight
+account in the HTTPS PWA using the registration code supplied with the preview,
+then use the same username/password in native settings; leave the optional
+tunnel Basic Auth fields blank. The username is kept in app preferences and the
+password is stored in this iPhone's Keychain. Select **Chỉ dùng iPhone**. The
+app logs into `/api/auth/login`, reads `/api/status`,
 sends detector frames to `/api/detect` (Moondream 3.1), and sends a fresh image
 plus question to `/api/analyze` (Moondream detection plus Qwen 3.8 27B vision).
 The live request cadence is capped at one frame per second to limit cloud use.
@@ -227,15 +229,18 @@ frame is at most 2.5 seconds old; it sends that iPhone JPEG and the question as
 multipart form data to `POST /api/analyze`. Vision can fall back to the
 backend's detector summary when no Vision provider is configured.
 
-For a first-pass path hint, detector boxes are checked against a central trapezoid
-that is narrower toward the image horizon and wider near the phone. A box in
-that corridor with paired depth up to 0.8 m is marked as a very-near candidate;
-above 0.8 m through 2.5 m it is inside the trial navigation horizon. Beyond
-2.5 m it is context only, so a distant detection does not by itself make the
-near path appear blocked. A missing depth reading remains unknown. The corridor
-geometry and 2.5 m horizon are starting values, not calibrated safety limits;
-box depth can still sample floor or background, and this hint must not be
-treated as proof that a route is clear.
+For a first-pass path hint, the live camera displays a tinted trapezoid that is
+narrow toward the image horizon and wider near the phone. A detection's lower
+edge must overlap that corridor; wide boxes count when they cross the corridor
+even if their center lies outside it. Paired depth up to 0.8 m is marked as a
+very-near candidate; above 0.8 m through 2.5 m it is inside the trial walking
+horizon. Beyond 2.5 m it is context only, so a very distant object does not by
+itself make the near path appear blocked. A fresh-frame summary distinguishes
+near, distant, and unknown-depth detections. No detection is described as proof
+that the path is clear. Missing depth remains unknown. The overlay geometry and
+2.5 m horizon are starting values, not calibrated safety limits; box depth can
+still sample floor or background, and the iPhone 12 Pro Max needs validation at
+known distances and camera angles.
 
 When the backend response also includes `hazard_zones`, the app shows MobileNet's
 left/center/right hazard probabilities and maps each full-height image region
@@ -315,14 +320,14 @@ The original repository is read-only for the connected account, so the app-only
 branch was pushed to the public fork
 [`npgb2505/Mini-AI-Camera-Module`](https://github.com/npgb2505/Mini-AI-Camera-Module)
 as `codex/ios-lidar-test-2026-10-11`. No KiCad files were included. GitHub
-Actions run [39811695629](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39811695629)
+Actions run [39817778031](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39817778031)
 succeeded, passed ten depth checks and one UI test that enters iPhone mode,
 finds the LiDAR readout, and returns to the mode chooser. It also launched the
 app in the simulator, built the device app, and created `RoSight-unsigned-ipa`.
 The IPA is saved at
-`../../../04_App/ios_builds/2026-10-22-run-39811695629/RoSight-unsigned.ipa`;
+`../../../04_App/ios_builds/2026-10-23-run-39817778031/RoSight-unsigned.ipa`;
 the simulator launch image is at
-`../../../04_App/ios_builds/2026-10-22-run-39811695629-simulator/launch.png`.
+`../../../04_App/ios_builds/2026-10-23-run-39817778031-simulator/launch.png`.
 The IPA is arm64, targets iOS 16.0+, and is unsigned; AltServer on Windows must
 sign it before installation.
 Standard hosted runners are free for public repositories; private repositories
