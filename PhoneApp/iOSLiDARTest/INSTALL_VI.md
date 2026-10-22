@@ -150,11 +150,13 @@ xác nhận có tiếng hay cảnh báo thật, và không bật MODE.
   `AVSpeechSynthesizer`; ở ESP32 mode, phát qua loa ESP32 là lựa chọn khác và
   cần firmware Wi-Fi hỗ trợ.
 - **Native voice conversation:** nút **Trò chuyện bằng giọng nói** cần quyền
-  Microphone và Speech Recognition. iPhone hiện chữ tạm trong lúc nghe; khi kết
-  thúc một lượt, audio WAV ngắn được gửi tới Whisper trên Cloudflare nếu dịch vụ
-  sẵn sàng. Nếu phiên âm cloud lỗi, app dùng transcript của iPhone. Transcript
-  cuối cùng và ảnh mới (nếu có) được gửi tới Qwen; audio không lưu trong D1.
-  Đây là hội thoại từng lượt, chưa full-duplex.
+  Microphone và Speech Recognition. iPhone hiện transcript trực tiếp; thông
+  thường transcript và ảnh mới (nếu có) được gửi thẳng tới Qwen để giảm một
+  lượt chờ mạng. Nếu độ tin cậy nhận dạng iOS thấp hơn 0,45 hoặc không có điểm
+  tin cậy, app có thể gửi audio WAV ngắn tới Whisper trên Cloudflare để cải
+  thiện transcript trước khi hỏi Qwen. Ngưỡng này là heuristic, chưa hiệu
+  chuẩn trên iPhone thật. Audio không lưu trong D1. Đây là hội thoại từng lượt,
+  chưa full-duplex.
 - PWA có thêm tùy chọn ghi âm trong app khi backend đã cấu hình API phiên âm;
   nếu không, dùng Speech Recognition của Safari/iOS để nhận tiếng Việt và gửi
   phần chữ tới Qwen trên Cloudflare. PWA cần Safari qua HTTPS và bật Siri để
