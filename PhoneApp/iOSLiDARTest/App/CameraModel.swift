@@ -8,6 +8,34 @@ struct FusedDetection: Identifiable {
     let label: String
     let confidence: Double
     let distanceMeters: Double?
+    let pathAssessment: DetectionPathAssessment
+}
+
+enum DetectionPathAssessment {
+    case immediateCandidate
+    case nearCandidate
+    case farContext
+    case outsideCorridor
+    case unknownDistance
+
+    var title: String {
+        switch self {
+        case .immediateCandidate: return "Ứng viên vật cản · rất gần"
+        case .nearCandidate: return "Ứng viên vật cản · trong tầm"
+        case .farContext: return "Ở xa · chỉ tham khảo"
+        case .outsideCorridor: return "Ngoài hành lang giữa"
+        case .unknownDistance: return "Chưa rõ cự ly"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .immediateCandidate: return .red
+        case .nearCandidate: return .orange
+        case .farContext, .outsideCorridor: return .white.opacity(0.68)
+        case .unknownDistance: return .yellow
+        }
+    }
 }
 
 struct FusedHazardZone: Identifiable {
@@ -61,6 +89,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     @Published private(set) var phoneDetectionsFresh = false
     @Published private(set) var phoneDetectorReady: Bool?
     @Published private(set) var phoneDetectorModel: String?
+    @Published private(set) var phoneDetectorProvider: String?
 
     private var backendBaseURL = ""
     private var accountUsername = ""
@@ -132,6 +161,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     private static let phoneDepthFreshnessSeconds = 1.0
     static let phoneProximityAlertThresholdMeters = 0.8
     static let phoneProximityResetThresholdMeters = 1.05
+    static let phoneNavigationHorizonMeters = 2.5
 
     override init() {
         let savedButtonEvents = Array(
@@ -203,6 +233,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             deviceVisionProvider = nil
             phoneDetectorReady = nil
             phoneDetectorModel = nil
+            phoneDetectorProvider = nil
             deviceConnection = nil
             deviceError = nil
             deviceAskError = nil
@@ -231,7 +262,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         self.accessUsername = accessUsername
         self.accessPassword = accessPassword
         if backendBaseURL.isEmpty {
-            status = "Nhập địa chỉ Flask để dùng YOLO server trong prototype camera iPhone hoặc hỏi AI."
+            status = "Nhập địa chỉ backend để hỏi ảnh hoặc chạy nhận diện camera iPhone."
         } else if self.accountUsername.isEmpty || self.accountPassword.isEmpty {
             status = "Nhập tài khoản Ro Sight trong cài đặt để kết nối."
         } else {
@@ -372,12 +403,19 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     var phoneDetectorStatusMessage: String {
         switch phoneDetectorReady {
         case .some(true):
-            let model = phoneDetectorModel.map { " (\($0))" } ?? ""
-            return "YOLO\(model) chạy trên Flask cho prototype camera iPhone; đây không phải model ESP32. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
+            let model: String
+            if phoneDetectorProvider == "cloudflare" {
+                model = phoneDetectorModel?.localizedCaseInsensitiveContains("moondream") == true
+                    ? "Moondream 3.1 trên Cloudflare"
+                    : "detector Cloudflare"
+            } else {
+                model = phoneDetectorModel ?? "detector trên backend"
+            }
+            return "Camera iPhone gửi frame tới \(model); đây không phải model chạy trên ESP32. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
         case .some(false):
-            return "YOLO server trên Flask chưa sẵn sàng cho prototype camera iPhone. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
+            return "Detector trên backend chưa sẵn sàng cho camera iPhone. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
         case .none:
-            return "Chưa xác minh YOLO server cho prototype camera iPhone. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
+            return "Chưa xác minh detector của backend cho camera iPhone. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
         }
     }
 
@@ -461,7 +499,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         phoneHazardZones = []
         phoneDetectionsCapturedAt = nil
         phoneDetectionsFresh = false
-        status = enabled ? "Đang chờ kết quả YOLO server mới từ Flask…" : "Đã tạm dừng gửi frame iPhone tới YOLO server."
+        status = enabled ? "Đang chờ detector server xử lý frame iPhone mới…" : "Đã tạm dừng gửi frame iPhone tới detector server."
     }
 
     func clearDevicePreview() {
@@ -1373,7 +1411,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         phoneFrameFresh = true
         guard shouldRunYOLO, detectionEnabled, !isDetecting else { return }
         guard !backendBaseURL.isEmpty else {
-            status = "Cần Flask để chạy YOLO server cho prototype camera iPhone."
+            status = "Cần địa chỉ backend trong Cài đặt để nhận diện camera iPhone."
             detectionEnabled = false
             detections = []
             phoneHazardZones = []
@@ -1385,7 +1423,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         isDetecting = true
         let detectionGeneration = phoneDetectionGeneration
         defer { if modeGeneration == phoneModeGeneration { isDetecting = false } }
-        status = "Đang gửi frame iPhone tới YOLO server trên Flask…"
+        status = "Đang gửi frame iPhone tới detector server…"
         do {
             let (data, response) = try await sendImage(endpoint: "detect", image: jpeg, timeoutInterval: 12)
             guard phoneModeActive,
@@ -1394,10 +1432,12 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                   detectionGeneration == phoneDetectionGeneration else { return }
             let payload = try Self.decode(YOLOPayload.self, data: data, response: response)
             detections = payload.detections.prefix(12).map { item in
-                FusedDetection(
+                let distance = depth?.distance(normalizedBox: item.box)
+                return FusedDetection(
                     label: item.label,
                     confidence: item.confidence,
-                    distanceMeters: depth?.distance(normalizedBox: item.box)
+                    distanceMeters: distance,
+                    pathAssessment: Self.assessDetectionPath(box: item.box, distanceMeters: distance)
                 )
             }
             phoneHazardZones = fuseHazardZones(payload.hazardZones, depth: depth)
@@ -1415,11 +1455,12 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             if phoneHazardZones.isEmpty {
                 zoneStatus = ""
             } else if phoneHazardZones.contains(where: { $0.isHazard }) {
-                zoneStatus = " · MobileNet báo vùng có nguy cơ"
+                zoneStatus = " · MobileNet gợi ý vùng ảnh có nguy cơ"
             } else {
-                zoneStatus = " · MobileNet đã phân tích ba vùng"
+                zoneStatus = " · MobileNet đã phân tích ba vùng ảnh"
             }
-            status = "YOLO server: \(detections.count) vật thể\(timing)\(zoneStatus) · \(depthStatus)"
+            let detectorName = phoneDetectorProvider == "cloudflare" ? "Moondream cloud" : "Detector server"
+            status = "\(detectorName): \(detections.count) vật thể\(timing)\(zoneStatus) · \(depthStatus)"
         } catch {
             if phoneModeActive,
                modeGeneration == phoneModeGeneration,
@@ -1429,7 +1470,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                 phoneHazardZones = []
                 phoneDetectionsCapturedAt = nil
                 phoneDetectionsFresh = false
-                status = userFacingErrorMessage(error, fallback: "Chưa gửi được frame tới YOLO Flask. Kiểm tra kết nối rồi thử lại.")
+                status = userFacingErrorMessage(error, fallback: "Chưa gửi được frame tới backend. Kiểm tra kết nối rồi thử lại.")
             }
         }
     }
@@ -1462,6 +1503,40 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         }
     }
 
+    private static func assessDetectionPath(box: [Double], distanceMeters: Double?) -> DetectionPathAssessment {
+        guard box.count >= 4, box.prefix(4).allSatisfy({ $0.isFinite }) else {
+            return .unknownDistance
+        }
+        let left = min(1, max(0, box[0]))
+        let top = min(1, max(0, box[1]))
+        let right = min(1, max(0, box[2]))
+        let bottom = min(1, max(0, box[3]))
+        guard right > left, bottom > top else { return .unknownDistance }
+
+        // Approximate the path as a trapezoid: narrow toward the horizon,
+        // wider near the phone. Use the detection's lower-center point as a
+        // first-pass estimate of where it meets the walking surface.
+        let minimumPathY = 0.25
+        guard bottom >= minimumPathY else { return .outsideCorridor }
+        let nearFactor = min(1, max(0, (bottom - minimumPathY) / (1 - minimumPathY)))
+        let halfWidth = 0.12 + 0.22 * nearFactor
+        let contactX = (left + right) / 2
+        guard abs(contactX - 0.5) <= halfWidth else { return .outsideCorridor }
+
+        guard let distanceMeters,
+              distanceMeters.isFinite,
+              distanceMeters >= 0.15 else {
+            return .unknownDistance
+        }
+        if distanceMeters <= Self.phoneProximityAlertThresholdMeters {
+            return .immediateCandidate
+        }
+        if distanceMeters <= Self.phoneNavigationHorizonMeters {
+            return .nearCandidate
+        }
+        return .farContext
+    }
+
     func ask(question: String) async {
         guard phoneModeActive else { return }
         let cleanedQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1474,7 +1549,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             return
         }
         guard !backendBaseURL.isEmpty else {
-            status = "Nhập địa chỉ Flask trong phần cài đặt trước."
+            status = "Nhập địa chỉ backend trong phần cài đặt trước."
             return
         }
 
@@ -1504,7 +1579,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             self.answer = answer
             status = payload.visionUsed == true
                 ? "Đã nhận câu trả lời từ Vision LLM."
-                : payload.visionError ?? "Đây là tóm tắt YOLO; Vision LLM chưa được gọi."
+                : payload.visionError ?? "Đây là tóm tắt detector; Vision LLM chưa được gọi."
         } catch {
             if phoneModeActive,
                modeGeneration == phoneModeGeneration,
@@ -1596,12 +1671,14 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             deviceVisionProvider = payload.visionProvider
             phoneDetectorReady = payload.detectorReady
             phoneDetectorModel = payload.detectorModel
+            phoneDetectorProvider = payload.detectorProvider
         } catch {
             if !Task.isCancelled {
                 deviceVisionReady = nil
                 deviceVisionProvider = nil
                 phoneDetectorReady = nil
                 phoneDetectorModel = nil
+                phoneDetectorProvider = nil
             }
         }
     }

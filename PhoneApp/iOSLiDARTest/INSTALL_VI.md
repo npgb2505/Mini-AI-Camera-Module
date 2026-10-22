@@ -5,7 +5,11 @@ miễn phí. Không cần sở hữu Mac. **PWA là đường thử ngay**; nati
 được build trên runner macOS của GitHub Actions rồi ký trên Windows trước khi
 cài.
 
-**Tình trạng ngày 18/10/2026:** app native và workflow đã được đẩy lên fork công
+**Tình trạng ngày 22/10/2026:** PWA cloud đã được deploy tạm lên Cloudflare với
+Qwen 3.8 27B, Moondream 3.1 và D1. Cần claim tài khoản trong thời hạn trên link
+gửi riêng để giữ preview. Thoại PWA dùng Speech Recognition của Safari/iOS
+(cần bật Siri), truyền câu trả lời Qwen dạng stream và đọc bằng giọng iPhone.
+Native app và workflow đã được đẩy lên fork công
 khai `npgb2505/Mini-AI-Camera-Module`; repo gốc vẫn chỉ có quyền đọc. GitHub
 Actions run [39092323818](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39092323818)
 đã qua 10 kiểm tra depth, 1 UI test vào chế độ iPhone và hiện bảng LiDAR, mở app
@@ -22,7 +26,7 @@ Simulator không có LiDAR iPhone; app chưa được ký, cài hoặc đo thử
 | Yêu cầu iOS | iOS 16 trở lên | Safari iOS hiện hành |
 | Camera iPhone | Có, chỉ mở ở mode **Chỉ dùng iPhone** | Có, khi mở qua HTTPS và cho phép Camera |
 | Khoảng cách LiDAR | ARKit `sceneDepth` khi runtime hỗ trợ; iPhone 12 Pro/12 Pro Max có LiDAR | Không có ARKit/sceneDepth. Khoảng cách luôn “chưa khả dụng”; không ước lượng mét từ ảnh |
-| Mic câu hỏi | Mic iPhone qua Dictation bàn phím; native gửi text, không thu audio | Dictation bàn phím hoặc ghi âm Safari tới API phiên âm khi backend bật |
+| Mic câu hỏi | Mic iPhone qua Dictation bàn phím; native gửi text, không thu audio | Speech Recognition Safari/iOS (cần Siri bật) hoặc Dictation bàn phím; Qwen trả lời theo stream |
 | ESP32 | BLE discovery/status/ToF/nút; FOMO cục bộ đang chờ artifact; Wi‑Fi/Flask lấy JPEG, FOMO snapshot và gọi Vision | Flask qua Wi‑Fi firmware hoặc USB bridge; không dùng BLE |
 | Đọc câu trả lời | `AVSpeechSynthesizer` trên iPhone | `speechSynthesis` của trình duyệt |
 
@@ -39,8 +43,9 @@ metadata không hợp lệ. Firmware bỏ ID 0 dành riêng và chuyển từ
 serial arithmetic. GPIO nút cũng chưa được xác minh, nên chưa có bằng chứng ba
 nút vật lý đang hoạt động trên board.
 
-YOLO chạy trên máy tính chỉ là prototype riêng cho camera iPhone. ESP32 không
-dùng YOLO server thay cho model của nó. Khi có artifact FOMO đã huấn luyện,
+Moondream trên Cloudflare hoặc YOLO chạy trên Flask là detector riêng cho camera
+iPhone; cả hai đều không thay model ESP32. Cloud backend có thể ghép box với
+LiDAR trong app native; PWA không đọc ARKit depth. Khi có artifact FOMO đã huấn luyện,
 firmware sẽ phát `detections` qua WebSocket Wi‑Fi; Flask đưa model, trạng thái
 inference, boot/frame và tuổi dữ liệu vào `/api/device/status`. App chỉ hiện
 FOMO khi `model_id` bắt đầu bằng `fomo:`, `inference_status` là `ok`, và output
@@ -137,10 +142,12 @@ xác nhận có tiếng hay cảnh báo thật, và không bật MODE.
   `AVSpeechSynthesizer`; ở ESP32 mode, phát qua loa ESP32 là lựa chọn khác và
   cần firmware Wi-Fi hỗ trợ.
 - PWA có thêm tùy chọn ghi âm trong app khi backend đã cấu hình API phiên âm;
-  nếu không, dùng Dictation trên bàn phím iPhone. PWA cần Safari qua HTTPS để
-  truy cập camera/microphone và dùng `speechSynthesis` để đọc câu trả lời.
-- Câu hỏi gửi tới máy chủ Ro Sight. YOLO server chỉ là prototype riêng cho
-  camera iPhone; ESP32 cần FOMO cục bộ sau khi có artifact đã huấn luyện. Vision
+  nếu không, dùng Speech Recognition của Safari/iOS để nhận tiếng Việt và gửi
+  phần chữ tới Qwen trên Cloudflare. PWA cần Safari qua HTTPS và bật Siri để
+  mở camera/mic; `speechSynthesis` đọc câu trả lời. Đây là hội thoại từng lượt,
+  chưa full-duplex.
+- Câu hỏi gửi tới máy chủ Ro Sight. Moondream/YOLO server chỉ dùng cho camera
+  iPhone; ESP32 cần FOMO cục bộ sau khi có artifact đã huấn luyện. Vision
   có thể chạy cục bộ nếu backend được cấu hình model local; nếu chọn dịch vụ API
   bên ngoài, phí phụ thuộc nhà cung cấp và tài khoản của bạn.
 - IPA từ workflow là **unsigned**; bước cài qua AltServer mới ký cho tài khoản

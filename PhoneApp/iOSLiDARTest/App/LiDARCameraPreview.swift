@@ -52,7 +52,8 @@ struct LiDARCameraPreview: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, ARSessionDelegate {
-        private static let minimumFrameInterval: TimeInterval = 0.4
+        // Keep cloud inference near one frame per second to control free-tier usage.
+        private static let minimumFrameInterval: TimeInterval = 1.0
         private weak var model: CameraModel?
         private let stateLock = NSLock()
         private var detectionEnabled = false

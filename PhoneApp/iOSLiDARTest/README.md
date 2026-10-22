@@ -25,11 +25,12 @@ The transport is hybrid: BLE carries identity, status, ToF, and button events.
 The ESP32's local FOMO detections are expected over the existing firmware
 Wi-Fi WebSocket `detections` event and Flask `/api/device/status` snapshot; they
 do not travel over BLE. JPEG/video, Vision requests, and speaker PCM also stay
-on Wi-Fi/Flask. Server-side YOLO is a separate iPhone-camera prototype and is
-never the ESP32 model. BLE cannot save a capture or complete an `ask_llm` action
+on Wi-Fi/Flask. Cloudflare/Flask detection is a separate iPhone-camera path and
+is never the ESP32 model. BLE cannot save a capture or complete an `ask_llm` action
 without the Wi-Fi/backend media path. The only GATT write currently supported
 is a button replay cursor; there is no remote MODE, capture, ask, volume, or
-alert command. The PWA remains on Flask/Wi-Fi/USB and does not use Bluetooth.
+alert command. The PWA uses Cloudflare for standalone phone vision/voice and
+Flask/Wi-Fi/USB for ESP32 media; it does not use Bluetooth.
 
 The native screen shows **BLE v1 · LIVE** only after `device_info` and `status`
 both decode as schema `1.0`, their `device_id` and `boot_id` match exactly, the
@@ -87,7 +88,7 @@ snapshot. The USB bridge requires the exact requested sequence. Direct
 firmware Wi-Fi may return a newer sequence because it fetches the latest image.
 ESP32 detections are shown only when the firmware identifies a FOMO model,
 reports `inference_status: "ok"`, and the detection frame, boot, and freshness
-match the displayed image. Server-side YOLO results are not reused in ESP32
+match the displayed image. Server-side detector results are not reused in ESP32
 mode. ToF is shown only when the backend marks the reading as
 device-originated and fresh; zones are separate sensor readings and are not
 assigned to objects in the JPEG.
@@ -162,12 +163,31 @@ Choose **Chỉ dùng iPhone** to use the rear camera and native ARKit scene dept
 without an ESP32. Scene depth is available only on supported iPhone hardware;
 the app checks ARKit frame-semantics support at runtime rather than assuming it
 from a model name. If ARKit camera tracking is supported but sceneDepth is not,
-camera frames, the Flask-hosted YOLO prototype, and image questions remain
-available while distances stay unavailable. That server-side YOLO path uses
-the iPhone camera and is separate from ESP32-local FOMO. The app waits for an actual frame with `sceneDepth` before
+camera frames, backend detection, and image questions remain available while
+distances stay unavailable. The phone-camera detector is separate from
+ESP32-local FOMO. The app waits for an actual frame with `sceneDepth` before
 reporting depth; it does not label depth as available merely because an AR
 session was started. The center-distance display also clears a sample after
 one second without a newer depth update.
+
+### Cloudflare phone backend
+
+The native **Chỉ dùng iPhone** mode can use the Cloudflare Worker preview for
+cloud detection and image questions while ARKit supplies depth locally. First
+create a Ro Sight account in the HTTPS PWA using the registration code supplied
+with the preview. In native settings, enter the Worker base URL and the same
+username/password; leave the optional tunnel Basic Auth fields blank. Select
+**Chỉ dùng iPhone**. The app logs into `/api/auth/login`, reads `/api/status`,
+sends detector frames to `/api/detect` (Moondream 3.1), and sends a fresh image
+plus question to `/api/analyze` (Moondream detection plus Qwen 3.8 27B vision).
+The live request cadence is capped at one frame per second to limit cloud use.
+
+The cloud Worker does not expose `/api/device/*`; ESP32 mode still requires the
+local Flask backend and its USB/Wi-Fi bridge. The native app itself does not yet
+have spoken conversation. Use the PWA for Siri/Safari speech recognition,
+streamed Qwen replies, and iPhone speech synthesis. Safari's PWA cannot read
+ARKit depth, so the native app is the path that pairs the model's boxes with
+sceneDepth from the same camera frame.
 
 The native iPhone screen can read a local Vietnamese proximity cue from the
 iPhone speaker without a backend connection. It triggers once when a fresh
@@ -178,26 +198,36 @@ only an estimated surface distance at the center of the image; it does not
 identify an object, choose a direction, or certify a safe path. The PWA stays
 browser-only and does not receive LiDAR measurements.
 
-For the iPhone-camera prototype, enabling YOLO sends a portrait JPEG to
-`POST /api/detect`, where YOLO runs on the computer. Flask returns normalized
+For the iPhone-camera mode, enabling detection sends a portrait JPEG to
+`POST /api/detect`, where the configured backend runs its detector. The response returns normalized
 `[x1, y1, x2, y2]` coordinates in the range 0–1; the app maps the central half
 of each box back to the depth map copied from the exact same ARKit frame as the
 JPEG. It reports the median of valid medium- or high-confidence LiDAR samples;
 if that region has no reliable depth, it reports no distance. Raw `sceneDepth`
 is preferred for lower latency, with `smoothedSceneDepth` as a fallback. The
-app sends at most 2.5 frames per second and skips frames while one inference is
-in progress; live YOLO requests time out after 12 seconds. Depth snapshots are
-copied only when YOLO is enabled to avoid needless work. There is no FOMO
+app sends at most one frame per second and skips frames while one inference is
+in progress; live requests time out after 12 seconds. Depth snapshots are
+copied only when detection is enabled to avoid needless work. There is no FOMO
 artifact involved in this path; it does not use a development mock as a
-detection result. These YOLO detections and their paired depth estimates are hidden once
+detection result. These detections and their paired depth estimates are hidden once
 the processed frame is more than 2.5 seconds old; the live camera may have
-advanced since that YOLO frame. This is an estimate that still needs a
+advanced since that detector frame. This is an estimate that still needs a
 known-distance check on the phone. A typed question is enabled only while the local camera
 frame is at most 2.5 seconds old; it sends that iPhone JPEG and the question as
 multipart form data to `POST /api/analyze`. Vision can fall back to the
-backend's YOLO summary when no Vision provider is configured.
+backend's detector summary when no Vision provider is configured.
 
-When the Flask response also includes `hazard_zones`, the app shows MobileNet's
+For a first-pass path hint, detector boxes are checked against a central trapezoid
+that is narrower toward the image horizon and wider near the phone. A box in
+that corridor with paired depth up to 0.8 m is marked as a very-near candidate;
+above 0.8 m through 2.5 m it is inside the trial navigation horizon. Beyond
+2.5 m it is context only, so a distant detection does not by itself make the
+near path appear blocked. A missing depth reading remains unknown. The corridor
+geometry and 2.5 m horizon are starting values, not calibrated safety limits;
+box depth can still sample floor or background, and this hint must not be
+treated as proof that a route is clear.
+
+When the backend response also includes `hazard_zones`, the app shows MobileNet's
 left/center/right hazard probabilities and maps each full-height image region
 to `sceneDepth` from the same ARKit frame. This is displayed as **Depth vùng**:
 the median can include floor or background depth and is not a verified

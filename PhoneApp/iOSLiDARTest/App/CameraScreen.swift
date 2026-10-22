@@ -121,7 +121,7 @@ struct CameraScreen: View {
                 }
 
                 Spacer(minLength: 0)
-                Text("YOLO trên Flask chỉ dùng cho prototype camera iPhone. ESP32 cần model FOMO chạy cục bộ; camera iPhone chỉ khởi động khi chọn chế độ iPhone.")
+                Text("Camera iPhone có thể dùng detector cloud hoặc backend riêng. ESP32 cần model chạy cục bộ; camera iPhone chỉ khởi động khi chọn chế độ iPhone.")
                     .font(.system(size: 11, weight: .regular, design: .rounded))
                     .foregroundStyle(.white.opacity(0.48))
                     .fixedSize(horizontal: false, vertical: true)
@@ -353,10 +353,10 @@ struct CameraScreen: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(model.phoneDetectionsFresh
-                         ? "YOLO FLASK · KẾT QUẢ MỚI"
+                         ? "DETECTOR · KẾT QUẢ MỚI"
                          : model.isDetecting
-                           ? "ĐANG CHỜ YOLO FLASK"
-                           : model.detectionEnabled ? "YOLO FLASK ĐANG BẬT" : "YOLO FLASK TẠM DỪNG")
+                           ? "ĐANG CHỜ DETECTOR"
+                           : model.detectionEnabled ? "DETECTOR ĐANG BẬT" : "DETECTOR TẠM DỪNG")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .tracking(1)
                         .foregroundStyle(model.phoneDetectionsFresh ? .mint : model.detectionEnabled ? .orange : .white.opacity(0.65))
@@ -381,7 +381,7 @@ struct CameraScreen: View {
                         .frame(width: 48, height: 48)
                         .background(.mint, in: Circle())
                 }
-                .accessibilityLabel(model.detectionEnabled ? "Tạm dừng gửi khung camera iPhone tới YOLO server Flask" : "Bật YOLO server Flask cho camera iPhone")
+                .accessibilityLabel(model.detectionEnabled ? "Tạm dừng gửi khung camera iPhone tới detector server" : "Bật nhận diện server cho camera iPhone")
             }
 
             if model.phoneDetectionsFresh, !model.detections.isEmpty {
@@ -397,6 +397,10 @@ struct CameraScreen: View {
                                 } ?? String(format: "LiDAR chưa rõ · %.0f%%", item.confidence * 100))
                                 .font(.system(size: 10, weight: .medium, design: .rounded))
                                 .foregroundStyle(.mint.opacity(0.9))
+                                Text(item.pathAssessment.title)
+                                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(item.pathAssessment.tint)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             .padding(.horizontal, 11)
                             .padding(.vertical, 9)
@@ -404,22 +408,22 @@ struct CameraScreen: View {
                         }
                     }
                 }
-                Text("Box YOLO Flask dùng tọa độ theo tỷ lệ của ảnh; app lấy depth từ cùng frame iPhone. Nếu thiếu depth tin cậy thì không hiện khoảng cách. Kết quả cũ tự ẩn.")
+                Text("Hành lang thử nghiệm có dạng hình thang: hẹp ở xa, rộng gần iPhone. Vật thể chỉ được xét khi box nằm trong hành lang và depth cùng vùng box ≤ 2,5 m; dưới 0,8 m là mức rất gần. Xa hơn chỉ để tham khảo. Depth vẫn là ước tính, thiếu depth không được xem là đường trống.")
                     .font(.system(size: 9, weight: .regular, design: .rounded))
                     .foregroundStyle(.white.opacity(0.5))
             } else if model.phoneDetectionsFresh {
-                Text("YOLO server chưa thấy vật thể rõ trong frame iPhone mới.")
+                Text("Detector server chưa thấy vật thể rõ trong frame iPhone mới.")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.55))
             } else {
-                Text(model.detectionEnabled ? "Đang chờ kết quả YOLO server từ frame iPhone mới." : "Bật YOLO server cho camera iPhone; kết quả cũ sẽ tự ẩn.")
+                Text(model.detectionEnabled ? "Đang chờ detector xử lý frame iPhone mới." : "Bật nhận diện server cho camera iPhone; kết quả cũ sẽ tự ẩn.")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.55))
             }
 
             if model.phoneDetectionsFresh, !model.phoneHazardZones.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("NGUY CƠ THEO VÙNG · MOBILENET")
+                    Text("GỢI Ý HÌNH ẢNH THEO VÙNG · MOBILENET")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .tracking(0.8)
                         .foregroundStyle(.white.opacity(0.7))
@@ -451,7 +455,7 @@ struct CameraScreen: View {
                             )
                         }
                     }
-                    Text("Depth vùng là trung vị sceneDepth của cùng ARFrame, có thể gồm nền hoặc mặt đất; đây chưa phải cự ly đã xác nhận tới vật cản. Kết quả cũ tự ẩn.")
+                    Text("MobileNet chỉ đưa gợi ý hình ảnh trái/giữa/phải; depth của vùng có thể gồm nền hoặc mặt đất nên không dùng riêng để kết luận đường bị chặn. Kết quả cũ tự ẩn.")
                         .font(.system(size: 9, weight: .regular, design: .rounded))
                         .foregroundStyle(.white.opacity(0.5))
                         .fixedSize(horizontal: false, vertical: true)
@@ -1189,7 +1193,7 @@ private struct BLEDevicePanel: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("BLE dùng cho discovery, status, ToF và nút. FOMO ESP32 đi qua sự kiện detections trên Wi-Fi firmware rồi tới snapshot Flask; YOLO Flask chỉ là prototype camera iPhone. JPEG/video, Vision và PCM loa dùng Wi-Fi/Flask.")
+            Text("BLE dùng cho discovery, status, ToF và nút. FOMO ESP32 đi qua sự kiện detections trên Wi-Fi firmware rồi tới snapshot Flask. Camera iPhone dùng detector của backend (Moondream Cloudflare hoặc YOLO Flask); JPEG/video và PCM loa vẫn cần Wi-Fi/Flask ở ESP32 mode.")
                 .font(.system(size: 9, weight: .regular, design: .rounded))
                 .foregroundStyle(.white.opacity(0.46))
                 .fixedSize(horizontal: false, vertical: true)
@@ -1255,8 +1259,8 @@ private struct BackendSettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Flask trên máy tính") {
-                    TextField("https://ten-tunnel.ngrok-free.app", text: $backendURL)
+                Section("Địa chỉ backend") {
+                    TextField("https://ten-worker.workers.dev", text: $backendURL)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -1274,7 +1278,7 @@ private struct BackendSettingsSheet: View {
                     SecureField("Mật khẩu tunnel (chỉ giữ trong phiên này)", text: $accessPassword)
                 }
                 Section {
-                    Text("Đăng nhập bằng tài khoản đã tạo trong Ro Sight. Nếu dùng Wi‑Fi nội bộ, nhập IP LAN và cổng Flask. Nếu dùng tunnel có Basic Auth, nhập thêm thông tin tunnel ở trên. Không nhập 127.0.0.1 trên iPhone.")
+                    Text("Với Cloudflare, tạo hồ sơ trước trong PWA Ro Sight bằng mã đăng ký, rồi dùng cùng tên đăng nhập và mật khẩu ở đây. Để trống Basic Auth. Chọn chế độ Chỉ dùng iPhone để dùng camera, LiDAR và model cloud; chế độ ESP32 vẫn cần backend Flask nội bộ.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
