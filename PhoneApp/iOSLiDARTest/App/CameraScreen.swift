@@ -522,7 +522,7 @@ struct CameraScreen: View {
             .buttonStyle(.plain)
             .disabled(model.isAsking)
             .accessibilityIdentifier("voice.conversation.toggle")
-            .accessibilityHint("iPhone nhận giọng nói tiếng Việt, gửi transcript và khung hình camera mới tới Qwen trên Cloudflare, rồi đọc câu trả lời.")
+            .accessibilityHint("iPhone hiện chữ nhận dạng tạm thời; audio câu nói được gửi tới Whisper Cloudflare khi sẵn sàng. Transcript và khung hình mới có thể gửi tới Qwen, rồi iPhone đọc câu trả lời.")
             if model.isVoiceConversationActive || model.isVoiceConnecting || !model.voiceStatus.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(model.voiceStatus)
@@ -536,7 +536,7 @@ struct CameraScreen: View {
                     }
                 }
             }
-            Text("Bạn có thể dùng Dictation hoặc hội thoại mic bên trên. Transcript và khung hình mới (nếu có) gửi tới Qwen trên Cloudflare; hội thoại native không tải bản ghi âm lên cloud.")
+            Text("Hội thoại mic gửi đoạn audio ngắn tới Whisper trên Cloudflare để phiên âm khi dịch vụ sẵn sàng; nếu lỗi, app dùng nhận dạng tiếng Việt của iPhone. Transcript và khung hình mới (nếu có) được gửi tới Qwen. Audio không được lưu trong cơ sở dữ liệu app.")
                 .font(.system(size: 10, weight: .regular, design: .rounded))
                 .foregroundStyle(.white.opacity(0.55))
             Text(model.phoneFrameFresh ? "Khung camera mới sẵn sàng để hỏi." : "Đang chờ khung camera mới; thao tác hỏi đang khóa.")

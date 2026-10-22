@@ -241,6 +241,8 @@ struct DeviceCapabilitiesPayload: Decodable {
     let detectorReady: Bool?
     let detectorModel: String?
     let detectorProvider: String?
+    let transcriptionReady: Bool?
+    let transcriptionModel: String?
 
     enum CodingKeys: String, CodingKey {
         case visionReady = "vision_ready"
@@ -248,6 +250,8 @@ struct DeviceCapabilitiesPayload: Decodable {
         case detectorReady = "detector_ready"
         case detectorModel = "detector_model"
         case detectorProvider = "detector_provider"
+        case transcriptionReady = "transcription_ready"
+        case transcriptionModel = "transcription_model"
     }
 }
 

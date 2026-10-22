@@ -97,6 +97,8 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     @Published private(set) var phoneDetectorReady: Bool?
     @Published private(set) var phoneDetectorModel: String?
     @Published private(set) var phoneDetectorProvider: String?
+    @Published private(set) var phoneTranscriptionReady: Bool?
+    @Published private(set) var phoneTranscriptionModel: String?
 
     private var backendBaseURL = ""
     private var accountUsername = ""
@@ -130,6 +132,8 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     private var voiceRecognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var voiceRecognitionTask: SFSpeechRecognitionTask?
     private var voiceAudioTapInstalled = false
+    private let voiceAudioCapture = VoiceAudioCapture()
+    private var lastVoiceCaptureWAV: Data?
     private var voiceDebounceTask: Task<Void, Never>?
     private var voiceResponseTask: Task<Void, Never>?
     private var voiceSessionGeneration = 0
@@ -258,6 +262,8 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             phoneDetectorReady = nil
             phoneDetectorModel = nil
             phoneDetectorProvider = nil
+            phoneTranscriptionReady = nil
+            phoneTranscriptionModel = nil
             deviceConnection = nil
             deviceError = nil
             deviceAskError = nil
@@ -1631,6 +1637,10 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             voiceStatus = "Nhập URL Cloudflare và đăng nhập trong Cài đặt trước."
             return
         }
+        if phoneTranscriptionReady == nil {
+            voiceStatus = "Đang kiểm tra phiên âm cloud…"
+            await refreshVisionCapabilitiesIfNeeded(force: true)
+        }
         guard let recognizer = vietnameseSpeechRecognizer else {
             voiceStatus = "iPhone hiện không có bộ nhận dạng giọng nói tiếng Việt."
             return
@@ -1667,9 +1677,16 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         voiceTranscript = ""
         latestVoiceTranscript = ""
         voiceHistory = []
-        voiceStatus = recognizer.supportsOnDeviceRecognition
-            ? "Đang nghe tiếng Việt; iPhone hỗ trợ nhận dạng trên thiết bị."
-            : "Đang nghe tiếng Việt bằng Speech của iPhone; transcript và ảnh mới được gửi tới Cloudflare."
+        if phoneTranscriptionReady == true {
+            let modelName = phoneTranscriptionModel?.localizedCaseInsensitiveContains("whisper-large-v3-turbo") == true
+                ? "Whisper Large v3 Turbo"
+                : "Whisper Cloudflare"
+            voiceStatus = "Đang nghe tiếng Việt; audio sẽ được phiên âm bằng \(modelName)."
+        } else {
+            voiceStatus = recognizer.supportsOnDeviceRecognition
+                ? "Đang nghe tiếng Việt; dùng Speech của iPhone vì phiên âm cloud chưa sẵn sàng."
+                : "Đang nghe tiếng Việt bằng Speech của iPhone; transcript và ảnh mới được gửi tới Cloudflare."
+        }
         do {
             try startVoiceRecognition()
         } catch {
@@ -1754,8 +1771,12 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         guard format.channelCount > 0, format.sampleRate > 0 else {
             throw APIError.message("iPhone chưa mở được luồng âm thanh từ Microphone.")
         }
+        voiceAudioCapture.reset(sampleRate: format.sampleRate)
+        lastVoiceCaptureWAV = nil
+        let audioCapture = voiceAudioCapture
         input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
             request.append(buffer)
+            audioCapture.append(buffer)
         }
         voiceAudioTapInstalled = true
 
@@ -1832,7 +1853,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         }
     }
 
-    private func stopVoiceCapture() {
+    private func stopVoiceCapture(preserveAudioForTurn: Bool = false) {
         voiceRecognitionGeneration += 1
         if voiceAudioEngine.isRunning { voiceAudioEngine.stop() }
         if voiceAudioTapInstalled {
@@ -1843,6 +1864,10 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         voiceRecognitionRequest = nil
         voiceRecognitionTask?.cancel()
         voiceRecognitionTask = nil
+        lastVoiceCaptureWAV = preserveAudioForTurn ? voiceAudioCapture.makeWAV() : nil
+        if !preserveAudioForTurn {
+            voiceAudioCapture.reset(sampleRate: 0)
+        }
         isVoiceListening = false
         deactivateSpeechSession()
     }
@@ -1855,9 +1880,13 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
         voiceDebounceTask?.cancel()
         voiceDebounceTask = nil
-        stopVoiceCapture()
+        stopVoiceCapture(preserveAudioForTurn: phoneTranscriptionReady == true)
+        let capturedAudio = lastVoiceCaptureWAV
+        lastVoiceCaptureWAV = nil
         isVoiceThinking = true
-        voiceStatus = "Đang gửi câu nói và ảnh camera mới tới Qwen…"
+        voiceStatus = phoneTranscriptionReady == true && capturedAudio != nil
+            ? "Đang gửi lời nói lên Whisper Cloudflare…"
+            : "Đang gửi câu nói và ảnh camera mới tới Qwen…"
         answer = ""
         voiceSpeechBuffer = ""
         voiceReplyStreamFinished = false
@@ -1871,6 +1900,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             await self?.streamVoiceAnswer(cleanedTranscript,
                                           history: history,
                                           image: image,
+                                          audioWAV: capturedAudio,
                                           voiceGeneration: voiceGeneration,
                                           modeGeneration: modeGeneration)
         }
@@ -1880,11 +1910,37 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         _ transcript: String,
         history: [[String: String]],
         image: Data?,
+        audioWAV: Data?,
         voiceGeneration: Int,
         modeGeneration: Int
     ) async {
         do {
-            let request = try makeVoiceTurnRequest(transcript, history: history, image: image)
+            var effectiveTranscript = transcript
+            if phoneTranscriptionReady == true, let audioWAV, !audioWAV.isEmpty {
+                do {
+                    voiceStatus = "\(voiceTranscriptionModelName) đang nhận dạng câu nói trên cloud…"
+                    let cloudTranscript = try await transcribeVoiceAudio(audioWAV)
+                    try Task.checkCancellation()
+                    guard voiceGeneration == voiceSessionGeneration,
+                          modeGeneration == phoneModeGeneration,
+                          isVoiceConversationActive else { return }
+                    if !cloudTranscript.isEmpty {
+                        effectiveTranscript = cloudTranscript
+                        voiceTranscript = cloudTranscript
+                        latestVoiceTranscript = cloudTranscript
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard voiceGeneration == voiceSessionGeneration,
+                          modeGeneration == phoneModeGeneration,
+                          isVoiceConversationActive,
+                          !Task.isCancelled else { return }
+                    voiceStatus = "Whisper cloud chưa trả lời; dùng nhận dạng tiếng Việt của iPhone…"
+                }
+            }
+
+            let request = try makeVoiceTurnRequest(effectiveTranscript, history: history, image: image)
             let (bytes, response) = try await performAuthenticatedStreamRequest(request)
             guard let http = response as? HTTPURLResponse else {
                 throw APIError.message("Cloudflare không trả trạng thái HTTP hợp lệ.")
@@ -1915,7 +1971,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                     let fullText = (event["text"] as? String ?? answer).trimmingCharacters(in: .whitespacesAndNewlines)
                     answer = fullText
                     voiceHistory = Array((history + [
-                        ["role": "user", "content": transcript],
+                        ["role": "user", "content": effectiveTranscript],
                         ["role": "assistant", "content": fullText]
                     ]).suffix(8))
                     completed = true
@@ -1939,6 +1995,31 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             voiceReplyStreamFinished = true
             finishVoiceReplyIfReady()
         }
+    }
+
+    private func transcribeVoiceAudio(_ wavData: Data) async throws -> String {
+        let boundary = "RoSight-ASR-\(UUID().uuidString)"
+        var request = try makeRequest(endpoint: "transcribe", method: "POST", timeoutInterval: 45)
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        var body = Data()
+        body.appendUTF8("--\(boundary)\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"voice-turn.wav\"\r\nContent-Type: audio/wav\r\n\r\n")
+        body.append(wavData)
+        body.appendUTF8("\r\n--\(boundary)--\r\n")
+        request.httpBody = body
+
+        let (data, response) = try await performAuthenticatedRequest(request)
+        let payload = try Self.decode(CloudTranscriptionPayload.self, data: data, response: response)
+        let transcript = payload.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !transcript.isEmpty else {
+            throw APIError.message("Whisper không nhận ra câu nói lần này.")
+        }
+        return transcript
+    }
+
+    private var voiceTranscriptionModelName: String {
+        phoneTranscriptionModel?.localizedCaseInsensitiveContains("whisper-large-v3-turbo") == true
+            ? "Whisper Large v3 Turbo"
+            : "Whisper Cloudflare"
     }
 
     private func makeVoiceTurnRequest(
@@ -2150,6 +2231,8 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             phoneDetectorReady = payload.detectorReady
             phoneDetectorModel = payload.detectorModel
             phoneDetectorProvider = payload.detectorProvider
+            phoneTranscriptionReady = payload.transcriptionReady
+            phoneTranscriptionModel = payload.transcriptionModel
         } catch {
             if !Task.isCancelled {
                 deviceVisionReady = nil
@@ -2157,6 +2240,8 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                 phoneDetectorReady = nil
                 phoneDetectorModel = nil
                 phoneDetectorProvider = nil
+                phoneTranscriptionReady = nil
+                phoneTranscriptionModel = nil
             }
         }
     }
@@ -2426,6 +2511,10 @@ private struct AnswerPayload: Decodable {
     }
 }
 
+private struct CloudTranscriptionPayload: Decodable {
+    let text: String?
+}
+
 private struct APIErrorPayload: Decodable {
     let error: String?
 }
@@ -2438,6 +2527,90 @@ private enum APIError: LocalizedError {
         switch self {
         case let .message(message), let .authentication(message): return message
         }
+    }
+}
+
+private final class VoiceAudioCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sampleRate = 0.0
+    private var pcm16Mono = Data()
+    private let maximumPCMBytes = 5 * 1_024 * 1_024
+
+    func reset(sampleRate: Double) {
+        lock.lock()
+        self.sampleRate = sampleRate
+        if !pcm16Mono.isEmpty {
+            pcm16Mono.resetBytes(in: 0..<pcm16Mono.count)
+        }
+        pcm16Mono.removeAll(keepingCapacity: false)
+        lock.unlock()
+    }
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        guard let channels = buffer.floatChannelData else { return }
+        let channelCount = Int(buffer.format.channelCount)
+        let frameCount = Int(buffer.frameLength)
+        guard channelCount > 0, frameCount > 0 else { return }
+
+        lock.lock()
+        defer { lock.unlock() }
+        let availableFrames = max(0, (maximumPCMBytes - pcm16Mono.count) / 2)
+        let framesToAppend = min(frameCount, availableFrames)
+        guard framesToAppend > 0 else { return }
+
+        var chunk = Data(capacity: framesToAppend * 2)
+        for frame in 0..<framesToAppend {
+            var mixedSample: Float = 0
+            for channel in 0..<channelCount {
+                mixedSample += channels[channel][frame]
+            }
+            mixedSample /= Float(channelCount)
+            mixedSample = mixedSample.isFinite ? min(1, max(-1, mixedSample)) : 0
+            let pcmSample = Int16(mixedSample * Float(Int16.max))
+            let littleEndianSample = UInt16(bitPattern: pcmSample)
+            chunk.append(UInt8(littleEndianSample & 0x00ff))
+            chunk.append(UInt8((littleEndianSample >> 8) & 0x00ff))
+        }
+        pcm16Mono.append(chunk)
+    }
+
+    func makeWAV() -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard sampleRate.isFinite,
+              sampleRate >= 8_000,
+              sampleRate <= 192_000,
+              !pcm16Mono.isEmpty,
+              pcm16Mono.count <= Int(UInt32.max) - 36 else {
+            if !pcm16Mono.isEmpty {
+                pcm16Mono.resetBytes(in: 0..<pcm16Mono.count)
+            }
+            pcm16Mono.removeAll(keepingCapacity: false)
+            sampleRate = 0
+            return nil
+        }
+
+        let sampleRateHz = UInt32(sampleRate.rounded())
+        let dataSize = UInt32(pcm16Mono.count)
+        var wav = Data(capacity: 44 + pcm16Mono.count)
+        wav.appendUTF8("RIFF")
+        wav.appendLittleEndian(dataSize + 36)
+        wav.appendUTF8("WAVEfmt ")
+        wav.appendLittleEndian(UInt32(16))
+        wav.appendLittleEndian(UInt16(1))
+        wav.appendLittleEndian(UInt16(1))
+        wav.appendLittleEndian(sampleRateHz)
+        wav.appendLittleEndian(sampleRateHz * 2)
+        wav.appendLittleEndian(UInt16(2))
+        wav.appendLittleEndian(UInt16(16))
+        wav.appendUTF8("data")
+        wav.appendLittleEndian(dataSize)
+        wav.append(pcm16Mono)
+
+        pcm16Mono.resetBytes(in: 0..<pcm16Mono.count)
+        pcm16Mono.removeAll(keepingCapacity: false)
+        sampleRate = 0
+        return wav
     }
 }
 
@@ -2473,5 +2646,17 @@ private func userFacingErrorMessage(_ error: Error, fallback: String) -> String 
 private extension Data {
     mutating func appendUTF8(_ value: String) {
         append(contentsOf: value.utf8)
+    }
+
+    mutating func appendLittleEndian(_ value: UInt16) {
+        append(UInt8(value & 0x00ff))
+        append(UInt8((value >> 8) & 0x00ff))
+    }
+
+    mutating func appendLittleEndian(_ value: UInt32) {
+        append(UInt8(value & 0x000000ff))
+        append(UInt8((value >> 8) & 0x000000ff))
+        append(UInt8((value >> 16) & 0x000000ff))
+        append(UInt8((value >> 24) & 0x000000ff))
     }
 }

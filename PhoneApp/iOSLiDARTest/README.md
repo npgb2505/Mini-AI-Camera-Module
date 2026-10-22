@@ -185,13 +185,17 @@ The live request cadence is capped at one frame per second to limit cloud use.
 The cloud Worker does not expose `/api/device/*`; ESP32 mode still requires the
 local Flask backend and its USB/Wi-Fi bridge. The native app now has a Vietnamese
 voice conversation control in **Chỉ dùng iPhone** mode. iOS Speech Recognition
-produces partial transcripts; after a short pause the app sends the text and,
+produces partial transcripts for live feedback. After a short pause, the app
+sends that utterance's short WAV audio to `/api/transcribe` when the Worker
+reports Whisper Large v3 Turbo ready; the cloud transcript replaces the iOS
+transcript when non-empty. If cloud transcription is unavailable or fails, the
+app continues with the iOS transcript. It then sends the selected text and,
 when fresh, the latest iPhone JPEG to `/api/voice/turn`. Qwen 3.8 27B streams
 answer text back, and AVSpeechSynthesizer speaks sentence chunks before the
 microphone resumes. The loop is turn-based, not full-duplex. The app requests
-Microphone and Speech Recognition permission; it prefers on-device recognition
-when iOS reports it is available, otherwise iOS may need a network connection.
-Raw microphone audio is not sent to Cloudflare by this native voice path.
+Microphone and Speech Recognition permission; iOS recognition remains the live
+partial-result and fallback path. Raw audio is sent only to the authenticated
+transcription endpoint during a voice turn; the Worker does not store it in D1.
 Safari's PWA also supports voice, but cannot read ARKit depth, so the native app
 is the path that pairs vision boxes with sceneDepth from the same camera frame.
 
