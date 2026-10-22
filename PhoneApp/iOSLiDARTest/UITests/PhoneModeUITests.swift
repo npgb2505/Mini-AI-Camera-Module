@@ -11,6 +11,7 @@ final class PhoneModeUITests: XCTestCase {
 
         let distanceReadout = app.descendants(matching: .any)["phone.distance.readout"]
         XCTAssertTrue(distanceReadout.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["voice.conversation.toggle"].exists)
         XCTAssertTrue(app.buttons["Chọn chế độ camera"].exists)
         XCTAssertTrue(app.buttons["Cài đặt backend"].exists)
 

@@ -26,7 +26,7 @@ Simulator không có LiDAR iPhone; app chưa được ký, cài hoặc đo thử
 | Yêu cầu iOS | iOS 16 trở lên | Safari iOS hiện hành |
 | Camera iPhone | Có, chỉ mở ở mode **Chỉ dùng iPhone** | Có, khi mở qua HTTPS và cho phép Camera |
 | Khoảng cách LiDAR | ARKit `sceneDepth` khi runtime hỗ trợ; iPhone 12 Pro/12 Pro Max có LiDAR | Không có ARKit/sceneDepth. Khoảng cách luôn “chưa khả dụng”; không ước lượng mét từ ảnh |
-| Mic câu hỏi | Mic iPhone qua Dictation bàn phím; native gửi text, không thu audio | Speech Recognition Safari/iOS (cần Siri bật) hoặc Dictation bàn phím; Qwen trả lời theo stream |
+| Mic câu hỏi | Dictation hoặc hội thoại native bằng iOS Speech; transcript và ảnh mới gửi Cloudflare; Qwen trả lời theo stream, iPhone đọc câu trả lời | Speech Recognition Safari/iOS (cần Siri bật) hoặc Dictation bàn phím; Qwen trả lời theo stream |
 | ESP32 | BLE discovery/status/ToF/nút; FOMO cục bộ đang chờ artifact; Wi‑Fi/Flask lấy JPEG, FOMO snapshot và gọi Vision | Flask qua Wi‑Fi firmware hoặc USB bridge; không dùng BLE |
 | Đọc câu trả lời | `AVSpeechSynthesizer` trên iPhone | `speechSynthesis` của trình duyệt |
 

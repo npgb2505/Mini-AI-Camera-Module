@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AVFoundation
+import Speech
 import UIKit
 
 struct FusedDetection: Identifiable {
@@ -84,6 +85,12 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     @Published var answer = ""
     @Published private(set) var isSpeakingAnswer = false
     @Published private(set) var speechError: String?
+    @Published private(set) var isVoiceConnecting = false
+    @Published private(set) var isVoiceConversationActive = false
+    @Published private(set) var isVoiceListening = false
+    @Published private(set) var isVoiceThinking = false
+    @Published private(set) var voiceTranscript = ""
+    @Published private(set) var voiceStatus = "Thoại native chưa bắt đầu."
     @Published var status = "Chọn chế độ camera để bắt đầu."
     @Published private(set) var phoneFrameFresh = false
     @Published private(set) var phoneDetectionsFresh = false
@@ -118,6 +125,20 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     private var activeSpeechUtteranceID: ObjectIdentifier?
     private var speechSessionActive = false
     private var activeSpeechIsProximityAlert = false
+    private let voiceAudioEngine = AVAudioEngine()
+    private let vietnameseSpeechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "vi-VN"))
+    private var voiceRecognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var voiceRecognitionTask: SFSpeechRecognitionTask?
+    private var voiceAudioTapInstalled = false
+    private var voiceDebounceTask: Task<Void, Never>?
+    private var voiceResponseTask: Task<Void, Never>?
+    private var voiceSessionGeneration = 0
+    private var voiceRecognitionGeneration = 0
+    private var latestVoiceTranscript = ""
+    private var voiceHistory: [[String: String]] = []
+    private var voiceSpeechBuffer = ""
+    private var voiceSpeechUtteranceIDs: Set<ObjectIdentifier> = []
+    private var voiceReplyStreamFinished = false
 
     @Published private(set) var deviceConnection: DeviceConnectionPayload?
     @Published private(set) var deviceFrameData: Data?
@@ -219,6 +240,9 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             || accountPassword != self.accountPassword
             || accessUsername != self.accessUsername
             || accessPassword != self.accessPassword {
+            if isVoiceConversationActive || isVoiceConnecting {
+                stopVoiceConversation()
+            }
             stopSpeakingAnswer()
             cancelDeviceSpeech()
             authenticationGeneration += 1
@@ -333,6 +357,9 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
     private func announcePhoneProximityAlert(_ message: String) {
         speechError = nil
+        if isVoiceConversationActive || isVoiceConnecting {
+            stopVoiceConversation()
+        }
         if UIAccessibility.isVoiceOverRunning {
             stopSpeakingAnswer()
             UIAccessibility.post(notification: .announcement, argument: message)
@@ -347,6 +374,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     }
 
     func startPhoneMode() {
+        stopVoiceConversation()
         stopSpeakingAnswer()
         phoneModeGeneration += 1
         phoneDetectionGeneration += 1
@@ -373,6 +401,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     }
 
     func stopPhoneMode() {
+        stopVoiceConversation()
         stopSpeakingAnswer()
         phoneModeGeneration += 1
         phoneDetectionGeneration += 1
@@ -464,6 +493,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         let utteranceID = ObjectIdentifier(utterance)
         Task { @MainActor [weak self] in
             self?.finishSpeech(utteranceID: utteranceID)
+            self?.finishVoiceSpeech(utteranceID: utteranceID)
         }
     }
 
@@ -474,6 +504,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         let utteranceID = ObjectIdentifier(utterance)
         Task { @MainActor [weak self] in
             self?.finishSpeech(utteranceID: utteranceID)
+            self?.finishVoiceSpeech(utteranceID: utteranceID)
         }
     }
 
@@ -1590,6 +1621,416 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         }
     }
 
+    func startVoiceConversation() async {
+        guard !isVoiceConversationActive, !isVoiceConnecting else { return }
+        guard phoneModeActive else {
+            voiceStatus = "Chọn chế độ Chỉ dùng iPhone trước."
+            return
+        }
+        guard !backendBaseURL.isEmpty else {
+            voiceStatus = "Nhập URL Cloudflare và đăng nhập trong Cài đặt trước."
+            return
+        }
+        guard let recognizer = vietnameseSpeechRecognizer else {
+            voiceStatus = "iPhone hiện không có bộ nhận dạng giọng nói tiếng Việt."
+            return
+        }
+
+        voiceSessionGeneration += 1
+        let requestedVoiceGeneration = voiceSessionGeneration
+        isVoiceConnecting = true
+        voiceStatus = "Đang xin quyền Microphone và Speech…"
+        defer { isVoiceConnecting = false }
+
+        let speechAuthorization = await requestVoiceSpeechAuthorization()
+        guard requestedVoiceGeneration == voiceSessionGeneration else { return }
+        guard speechAuthorization == .authorized else {
+            voiceStatus = "Cần cho phép Nhận dạng giọng nói trong iPhone để bắt đầu."
+            return
+        }
+        let microphoneAuthorized = await requestVoiceMicrophoneAuthorization()
+        guard requestedVoiceGeneration == voiceSessionGeneration else { return }
+        guard microphoneAuthorized else {
+            voiceStatus = "Cần cho phép Microphone trong iPhone để bắt đầu."
+            return
+        }
+        guard recognizer.isAvailable else {
+            voiceStatus = "Dịch vụ nhận tiếng Việt của iPhone đang ngoại tuyến hoặc bận."
+            return
+        }
+        guard phoneModeActive, requestedVoiceGeneration == voiceSessionGeneration else { return }
+
+        stopSpeakingAnswer()
+        isVoiceConversationActive = true
+        isVoiceListening = false
+        isVoiceThinking = false
+        voiceTranscript = ""
+        latestVoiceTranscript = ""
+        voiceHistory = []
+        voiceStatus = recognizer.supportsOnDeviceRecognition
+            ? "Đang nghe tiếng Việt; iPhone hỗ trợ nhận dạng trên thiết bị."
+            : "Đang nghe tiếng Việt bằng Speech của iPhone; transcript và ảnh mới được gửi tới Cloudflare."
+        do {
+            try startVoiceRecognition()
+        } catch {
+            isVoiceConversationActive = false
+            voiceStatus = userFacingErrorMessage(error, fallback: "Chưa mở được Microphone trên iPhone.")
+            stopVoiceCapture()
+        }
+    }
+
+    func stopVoiceConversation() {
+        guard isVoiceConversationActive || isVoiceConnecting || isVoiceListening || isVoiceThinking else { return }
+        voiceSessionGeneration += 1
+        voiceResponseTask?.cancel()
+        voiceResponseTask = nil
+        voiceDebounceTask?.cancel()
+        voiceDebounceTask = nil
+        stopVoiceCapture()
+        if !voiceSpeechUtteranceIDs.isEmpty {
+            speechSynthesizer.stopSpeaking(at: .immediate)
+            voiceSpeechUtteranceIDs.removeAll()
+        }
+        voiceSpeechBuffer = ""
+        voiceReplyStreamFinished = false
+        isVoiceConnecting = false
+        isVoiceConversationActive = false
+        isVoiceListening = false
+        isVoiceThinking = false
+        deactivateSpeechSession()
+        voiceStatus = "Đã kết thúc hội thoại giọng nói."
+    }
+
+    private func requestVoiceSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
+        let current = SFSpeechRecognizer.authorizationStatus()
+        guard current == .notDetermined else { return current }
+        return await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status)
+            }
+        }
+    }
+
+    private func requestVoiceMicrophoneAuthorization() async -> Bool {
+        let audioSession = AVAudioSession.sharedInstance()
+        switch audioSession.recordPermission {
+        case .granted:
+            return true
+        case .denied:
+            return false
+        case .undetermined:
+            return await withCheckedContinuation { continuation in
+                audioSession.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        @unknown default:
+            return false
+        }
+    }
+
+    private func startVoiceRecognition() throws {
+        guard isVoiceConversationActive,
+              let recognizer = vietnameseSpeechRecognizer,
+              recognizer.isAvailable else {
+            throw APIError.message("Nhận dạng giọng nói tiếng Việt trên iPhone chưa sẵn sàng.")
+        }
+
+        let audioSession = AVAudioSession.sharedInstance()
+        try audioSession.setCategory(.playAndRecord,
+                                     mode: .voiceChat,
+                                     options: [.defaultToSpeaker, .allowBluetooth])
+        try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
+        speechSessionActive = true
+
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.taskHint = .dictation
+        request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
+        voiceRecognitionRequest = request
+
+        let input = voiceAudioEngine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.channelCount > 0, format.sampleRate > 0 else {
+            throw APIError.message("iPhone chưa mở được luồng âm thanh từ Microphone.")
+        }
+        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
+            request.append(buffer)
+        }
+        voiceAudioTapInstalled = true
+
+        voiceRecognitionGeneration += 1
+        let recognitionGeneration = voiceRecognitionGeneration
+        voiceRecognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            let text = result?.bestTranscription.formattedString ?? ""
+            let isFinal = result?.isFinal ?? false
+            let errorMessage = error?.localizedDescription
+            Task { @MainActor [weak self] in
+                self?.handleVoiceRecognition(text: text,
+                                              isFinal: isFinal,
+                                              errorMessage: errorMessage,
+                                              generation: recognitionGeneration)
+            }
+        }
+
+        voiceAudioEngine.prepare()
+        try voiceAudioEngine.start()
+        isVoiceListening = true
+        isVoiceThinking = false
+        voiceStatus = "Đang nghe… nói tự nhiên bằng tiếng Việt."
+    }
+
+    private func handleVoiceRecognition(
+        text: String,
+        isFinal: Bool,
+        errorMessage: String?,
+        generation: Int
+    ) {
+        guard generation == voiceRecognitionGeneration,
+              isVoiceConversationActive,
+              !isVoiceThinking else { return }
+
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleaned.isEmpty {
+            latestVoiceTranscript = cleaned
+            voiceTranscript = cleaned
+            voiceStatus = "Đang nghe tiếng Việt…"
+            voiceDebounceTask?.cancel()
+            if isFinal {
+                Task { await submitVoiceTurn(cleaned) }
+            } else {
+                voiceDebounceTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 1_250_000_000)
+                    guard let self,
+                          !Task.isCancelled,
+                          self.isVoiceConversationActive,
+                          !self.isVoiceThinking,
+                          self.latestVoiceTranscript == cleaned else { return }
+                    await self.submitVoiceTurn(cleaned)
+                }
+            }
+            return
+        }
+
+        if let errorMessage, !errorMessage.isEmpty {
+            let isNoSpeech = errorMessage.localizedCaseInsensitiveContains("no speech")
+            voiceStatus = isNoSpeech
+                ? "Chưa nghe rõ; đang mở lại Microphone…"
+                : "Nhận giọng nói bị gián đoạn. \(errorMessage)"
+            stopVoiceCapture()
+            guard isVoiceConversationActive else { return }
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                guard let self, self.isVoiceConversationActive, !self.isVoiceThinking else { return }
+                do {
+                    try self.startVoiceRecognition()
+                } catch {
+                    self.voiceStatus = userFacingErrorMessage(error, fallback: "Chưa mở lại được Microphone.")
+                    self.isVoiceConversationActive = false
+                }
+            }
+        }
+    }
+
+    private func stopVoiceCapture() {
+        voiceRecognitionGeneration += 1
+        if voiceAudioEngine.isRunning { voiceAudioEngine.stop() }
+        if voiceAudioTapInstalled {
+            voiceAudioEngine.inputNode.removeTap(onBus: 0)
+            voiceAudioTapInstalled = false
+        }
+        voiceRecognitionRequest?.endAudio()
+        voiceRecognitionRequest = nil
+        voiceRecognitionTask?.cancel()
+        voiceRecognitionTask = nil
+        isVoiceListening = false
+        deactivateSpeechSession()
+    }
+
+    private func submitVoiceTurn(_ transcript: String) async {
+        let cleanedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isVoiceConversationActive,
+              !isVoiceThinking,
+              cleanedTranscript.count >= 2 else { return }
+
+        voiceDebounceTask?.cancel()
+        voiceDebounceTask = nil
+        stopVoiceCapture()
+        isVoiceThinking = true
+        voiceStatus = "Đang gửi câu nói và ảnh camera mới tới Qwen…"
+        answer = ""
+        voiceSpeechBuffer = ""
+        voiceReplyStreamFinished = false
+        let voiceGeneration = voiceSessionGeneration
+        let modeGeneration = phoneModeGeneration
+        let history = voiceHistory
+        let image = phoneHasFreshFrame ? latestJPEG : nil
+
+        voiceResponseTask?.cancel()
+        voiceResponseTask = Task { [weak self] in
+            await self?.streamVoiceAnswer(cleanedTranscript,
+                                          history: history,
+                                          image: image,
+                                          voiceGeneration: voiceGeneration,
+                                          modeGeneration: modeGeneration)
+        }
+    }
+
+    private func streamVoiceAnswer(
+        _ transcript: String,
+        history: [[String: String]],
+        image: Data?,
+        voiceGeneration: Int,
+        modeGeneration: Int
+    ) async {
+        do {
+            let request = try makeVoiceTurnRequest(transcript, history: history, image: image)
+            let (bytes, response) = try await performAuthenticatedStreamRequest(request)
+            guard let http = response as? HTTPURLResponse else {
+                throw APIError.message("Cloudflare không trả trạng thái HTTP hợp lệ.")
+            }
+            guard http.statusCode == 200 else {
+                throw APIError.message("Cloudflare chưa nhận được câu thoại (HTTP \(http.statusCode)). Kiểm tra URL và đăng nhập.")
+            }
+
+            var completed = false
+            for try await line in bytes.lines {
+                try Task.checkCancellation()
+                guard voiceGeneration == voiceSessionGeneration,
+                      modeGeneration == phoneModeGeneration,
+                      isVoiceConversationActive else { return }
+                guard line.hasPrefix("data:") else { continue }
+                let json = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                guard let data = json.data(using: .utf8),
+                      let event = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let type = event["type"] as? String else { continue }
+
+                if type == "delta" {
+                    let delta = event["text"] as? String ?? ""
+                    guard !delta.isEmpty else { continue }
+                    answer += delta
+                    voiceStatus = "Qwen đang trả lời bằng giọng nói…"
+                    queueVoiceSpeech(delta, flush: false)
+                } else if type == "done" {
+                    let fullText = (event["text"] as? String ?? answer).trimmingCharacters(in: .whitespacesAndNewlines)
+                    answer = fullText
+                    voiceHistory = Array((history + [
+                        ["role": "user", "content": transcript],
+                        ["role": "assistant", "content": fullText]
+                    ]).suffix(8))
+                    completed = true
+                    voiceReplyStreamFinished = true
+                    queueVoiceSpeech("", flush: true)
+                    finishVoiceReplyIfReady()
+                } else if type == "error" {
+                    throw APIError.message(event["message"] as? String ?? "Qwen chưa trả lời được lượt này.")
+                }
+            }
+            guard completed else {
+                throw APIError.message("Luồng trả lời cloud kết thúc trước khi hoàn tất.")
+            }
+        } catch {
+            guard voiceGeneration == voiceSessionGeneration,
+                  modeGeneration == phoneModeGeneration,
+                  isVoiceConversationActive,
+                  !Task.isCancelled else { return }
+            voiceStatus = userFacingErrorMessage(error, fallback: "Mất kết nối khi hỏi Qwen trên Cloudflare.")
+            isVoiceThinking = false
+            voiceReplyStreamFinished = true
+            finishVoiceReplyIfReady()
+        }
+    }
+
+    private func makeVoiceTurnRequest(
+        _ transcript: String,
+        history: [[String: String]],
+        image: Data?
+    ) throws -> URLRequest {
+        let boundary = "RoSight-Voice-\(UUID().uuidString)"
+        var request = try makeRequest(endpoint: "voice/turn", method: "POST", timeoutInterval: 150)
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        var body = Data()
+        body.appendUTF8("--\(boundary)\r\nContent-Disposition: form-data; name=\"text\"\r\n\r\n\(transcript)\r\n")
+        let historyData = try JSONSerialization.data(withJSONObject: history)
+        let historyText = String(data: historyData, encoding: .utf8) ?? "[]"
+        body.appendUTF8("--\(boundary)\r\nContent-Disposition: form-data; name=\"history\"\r\n\r\n\(historyText)\r\n")
+        if let image, image.count <= 240_000 {
+            body.appendUTF8("--\(boundary)\r\nContent-Disposition: form-data; name=\"image\"; filename=\"iphone-frame.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n")
+            body.append(image)
+            body.appendUTF8("\r\n")
+        }
+        body.appendUTF8("--\(boundary)--\r\n")
+        request.httpBody = body
+        return request
+    }
+
+    private func queueVoiceSpeech(_ text: String, flush: Bool) {
+        voiceSpeechBuffer += text
+        let sentencePattern = #"[.!?…](?:\s+|$)"#
+        while let range = voiceSpeechBuffer.range(of: sentencePattern, options: .regularExpression) {
+            let chunk = String(voiceSpeechBuffer[..<range.upperBound])
+            voiceSpeechBuffer.removeSubrange(..<range.upperBound)
+            enqueueVoiceSpeechChunk(chunk)
+        }
+        if !flush, voiceSpeechBuffer.count > 100,
+           let split = voiceSpeechBuffer.prefix(90).lastIndex(of: " ") {
+            let chunk = String(voiceSpeechBuffer[..<split])
+            voiceSpeechBuffer.removeSubrange(...split)
+            enqueueVoiceSpeechChunk(chunk)
+        }
+        if flush {
+            enqueueVoiceSpeechChunk(voiceSpeechBuffer)
+            voiceSpeechBuffer = ""
+        }
+    }
+
+    private func enqueueVoiceSpeechChunk(_ text: String) {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try audioSession.setActive(true)
+            speechSessionActive = true
+        } catch {
+            voiceStatus = "Đang hiện chữ; iPhone không mở được loa để đọc câu trả lời."
+            return
+        }
+        let utterance = AVSpeechUtterance(string: cleaned)
+        utterance.voice = AVSpeechSynthesisVoice(language: "vi-VN")
+        utterance.rate = 0.92
+        let identifier = ObjectIdentifier(utterance)
+        voiceSpeechUtteranceIDs.insert(identifier)
+        speechSynthesizer.speak(utterance)
+    }
+
+    private func finishVoiceSpeech(utteranceID: ObjectIdentifier) {
+        guard voiceSpeechUtteranceIDs.remove(utteranceID) != nil else { return }
+        finishVoiceReplyIfReady()
+    }
+
+    private func finishVoiceReplyIfReady() {
+        guard voiceReplyStreamFinished, voiceSpeechUtteranceIDs.isEmpty else { return }
+        voiceReplyStreamFinished = false
+        isVoiceThinking = false
+        deactivateSpeechSession()
+        guard isVoiceConversationActive else { return }
+        voiceStatus = "Đã xong lượt này; đang mở lại Microphone…"
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard let self,
+                  self.isVoiceConversationActive,
+                  !self.isVoiceThinking else { return }
+            do {
+                try self.startVoiceRecognition()
+            } catch {
+                self.voiceStatus = userFacingErrorMessage(error, fallback: "Chưa mở lại được Microphone.")
+                self.isVoiceConversationActive = false
+            }
+        }
+    }
+
     private func sendImage(
         endpoint: String,
         image: Data,
@@ -1646,6 +2087,43 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             throw APIError.message("Cài đặt backend đã đổi. Thử lại với thông tin mới.")
         }
         result = try await URLSession.shared.data(for: request)
+        try Task.checkCancellation()
+        guard generation == authenticationGeneration else {
+            throw APIError.message("Cài đặt backend đã đổi. Thử lại với thông tin mới.")
+        }
+        if (result.1 as? HTTPURLResponse)?.statusCode == 401 {
+            isAuthenticated = false
+            authenticationError = "Phiên đăng nhập bị từ chối. Kiểm tra tài khoản Ro Sight và Basic Auth của tunnel trong cài đặt."
+        }
+        return result
+    }
+
+    private func performAuthenticatedStreamRequest(
+        _ request: URLRequest
+    ) async throws -> (URLSession.AsyncBytes, URLResponse) {
+        let generation = authenticationGeneration
+        try Task.checkCancellation()
+        try await ensureAuthenticated()
+        try Task.checkCancellation()
+        guard generation == authenticationGeneration else {
+            throw APIError.message("Cài đặt backend đã đổi. Thử lại với thông tin mới.")
+        }
+        var result = try await URLSession.shared.bytes(for: request)
+        try Task.checkCancellation()
+        guard generation == authenticationGeneration else {
+            throw APIError.message("Cài đặt backend đã đổi. Thử lại với thông tin mới.")
+        }
+        guard (result.1 as? HTTPURLResponse)?.statusCode == 401 else { return result }
+
+        isAuthenticated = false
+        authenticationError = nil
+        authenticationRetryAfter = .distantPast
+        try await ensureAuthenticated()
+        try Task.checkCancellation()
+        guard generation == authenticationGeneration else {
+            throw APIError.message("Cài đặt backend đã đổi. Thử lại với thông tin mới.")
+        }
+        result = try await URLSession.shared.bytes(for: request)
         try Task.checkCancellation()
         guard generation == authenticationGeneration else {
             throw APIError.message("Cài đặt backend đã đổi. Thử lại với thông tin mới.")

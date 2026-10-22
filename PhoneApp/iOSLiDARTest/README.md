@@ -183,11 +183,17 @@ plus question to `/api/analyze` (Moondream detection plus Qwen 3.8 27B vision).
 The live request cadence is capped at one frame per second to limit cloud use.
 
 The cloud Worker does not expose `/api/device/*`; ESP32 mode still requires the
-local Flask backend and its USB/Wi-Fi bridge. The native app itself does not yet
-have spoken conversation. Use the PWA for Siri/Safari speech recognition,
-streamed Qwen replies, and iPhone speech synthesis. Safari's PWA cannot read
-ARKit depth, so the native app is the path that pairs the model's boxes with
-sceneDepth from the same camera frame.
+local Flask backend and its USB/Wi-Fi bridge. The native app now has a Vietnamese
+voice conversation control in **Chỉ dùng iPhone** mode. iOS Speech Recognition
+produces partial transcripts; after a short pause the app sends the text and,
+when fresh, the latest iPhone JPEG to `/api/voice/turn`. Qwen 3.8 27B streams
+answer text back, and AVSpeechSynthesizer speaks sentence chunks before the
+microphone resumes. The loop is turn-based, not full-duplex. The app requests
+Microphone and Speech Recognition permission; it prefers on-device recognition
+when iOS reports it is available, otherwise iOS may need a network connection.
+Raw microphone audio is not sent to Cloudflare by this native voice path.
+Safari's PWA also supports voice, but cannot read ARKit depth, so the native app
+is the path that pairs vision boxes with sceneDepth from the same camera frame.
 
 The native iPhone screen can read a local Vietnamese proximity cue from the
 iPhone speaker without a backend connection. It triggers once when a fresh

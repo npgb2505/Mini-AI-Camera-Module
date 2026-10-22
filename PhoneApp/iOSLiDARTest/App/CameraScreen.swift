@@ -496,7 +496,47 @@ struct CameraScreen: View {
                 .disabled(model.isAsking || !model.phoneFrameFresh || phoneQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityLabel("Hỏi Vision LLM về ảnh iPhone")
             }
-            Text("Chạm mic Dictation trên bàn phím iPhone để nói; app gửi phần chữ, không gửi bản ghi âm.")
+            Button {
+                if model.isVoiceConversationActive || model.isVoiceConnecting {
+                    model.stopVoiceConversation()
+                } else {
+                    Task { await model.startVoiceConversation() }
+                }
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: model.isVoiceConnecting ? "ellipsis.circle" : (model.isVoiceConversationActive ? "stop.circle.fill" : "waveform.circle.fill"))
+                        .font(.system(size: 19, weight: .semibold))
+                    Text(model.isVoiceConnecting
+                         ? "Đang mở Microphone…"
+                         : model.isVoiceConversationActive
+                            ? (model.isVoiceThinking ? "Đang trả lời · chạm để dừng" : "Đang nghe · chạm để dừng")
+                            : "Trò chuyện bằng giọng nói")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.black)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .padding(.horizontal, 14)
+                .background(model.isVoiceConversationActive ? Color.orange : Color.mint, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(model.isAsking)
+            .accessibilityIdentifier("voice.conversation.toggle")
+            .accessibilityHint("iPhone nhận giọng nói tiếng Việt, gửi transcript và khung hình camera mới tới Qwen trên Cloudflare, rồi đọc câu trả lời.")
+            if model.isVoiceConversationActive || model.isVoiceConnecting || !model.voiceStatus.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(model.voiceStatus)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(model.isVoiceConversationActive ? .mint.opacity(0.9) : .white.opacity(0.6))
+                    if !model.voiceTranscript.isEmpty {
+                        Text("Bạn nói: \(model.voiceTranscript)")
+                            .font(.system(size: 11, weight: .regular, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.82))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            Text("Bạn có thể dùng Dictation hoặc hội thoại mic bên trên. Transcript và khung hình mới (nếu có) gửi tới Qwen trên Cloudflare; hội thoại native không tải bản ghi âm lên cloud.")
                 .font(.system(size: 10, weight: .regular, design: .rounded))
                 .foregroundStyle(.white.opacity(0.55))
             Text(model.phoneFrameFresh ? "Khung camera mới sẵn sàng để hỏi." : "Đang chờ khung camera mới; thao tác hỏi đang khóa.")
