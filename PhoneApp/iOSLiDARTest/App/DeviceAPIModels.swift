@@ -243,6 +243,9 @@ struct DeviceCapabilitiesPayload: Decodable {
     let detectorProvider: String?
     let transcriptionReady: Bool?
     let transcriptionModel: String?
+    let voiceRealtimeReady: Bool?
+    let voiceSttModel: String?
+    let voiceRealtimeNote: String?
 
     enum CodingKeys: String, CodingKey {
         case visionReady = "vision_ready"
@@ -252,6 +255,9 @@ struct DeviceCapabilitiesPayload: Decodable {
         case detectorProvider = "detector_provider"
         case transcriptionReady = "transcription_ready"
         case transcriptionModel = "transcription_model"
+        case voiceRealtimeReady = "voice_realtime_ready"
+        case voiceSttModel = "voice_stt_model"
+        case voiceRealtimeNote = "voice_realtime_note"
     }
 }
 

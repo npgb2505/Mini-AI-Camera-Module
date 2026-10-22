@@ -551,7 +551,7 @@ struct CameraScreen: View {
                     Image(systemName: model.isVoiceConnecting ? "ellipsis.circle" : (model.isVoiceConversationActive ? "stop.circle.fill" : "waveform.circle.fill"))
                         .font(.system(size: 19, weight: .semibold))
                     Text(model.isVoiceConnecting
-                         ? "Đang mở Microphone…"
+                         ? "Đang kết nối thoại cloud…"
                          : model.isVoiceConversationActive
                             ? (model.isVoiceThinking ? "Đang trả lời · chạm để dừng" : "Đang nghe · chạm để dừng")
                             : "Trò chuyện bằng giọng nói")
@@ -566,7 +566,7 @@ struct CameraScreen: View {
             .buttonStyle(.plain)
             .disabled(model.isAsking)
             .accessibilityIdentifier("voice.conversation.toggle")
-            .accessibilityHint("iPhone hiện chữ nhận dạng trực tiếp; transcript và khung hình mới gửi tới Qwen. Nếu độ tin cậy thấp, đoạn audio ngắn có thể được gửi tới Whisper. iPhone đọc câu trả lời.")
+            .accessibilityHint(model.phoneVoicePathDescription)
             if model.isVoiceConversationActive || model.isVoiceConnecting || !model.voiceStatus.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(model.voiceStatus)
@@ -580,7 +580,7 @@ struct CameraScreen: View {
                     }
                 }
             }
-            Text("iPhone nhận dạng giọng nói trực tiếp để trả lời nhanh; transcript và khung hình mới (nếu có) gửi tới Qwen. Nếu độ tin cậy nhận dạng thấp, app có thể gửi audio ngắn tới Whisper trên Cloudflare. Audio không được lưu trong cơ sở dữ liệu app.")
+            Text(model.phoneVoicePathDescription + " Audio không được lưu trong cơ sở dữ liệu app.")
                 .font(.system(size: 10, weight: .regular, design: .rounded))
                 .foregroundStyle(.white.opacity(0.55))
             Text(model.phoneFrameFresh ? "Khung camera mới sẵn sàng để hỏi." : "Đang chờ khung camera mới; thao tác hỏi đang khóa.")

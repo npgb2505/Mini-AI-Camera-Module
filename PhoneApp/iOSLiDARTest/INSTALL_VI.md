@@ -5,11 +5,13 @@ miễn phí. Không cần sở hữu Mac. **PWA là đường thử ngay**; nati
 được build trên runner macOS của GitHub Actions rồi ký trên Windows trước khi
 cài.
 
-**Tình trạng ngày 23/10/2026:** PWA cloud hiện chạy bản `voice-vi-v3` trên
-Cloudflare với Qwen 3.8 27B, Moondream 3.1 và Whisper Large v3 Turbo. Thoại
-PWA dùng Speech Recognition của Safari/iOS (cần bật Siri), truyền câu trả lời
-Qwen theo luồng và đọc bằng giọng iPhone. Tài khoản preview là tạm; cần claim
-qua link gửi riêng trước hạn để giữ preview.
+**Tình trạng ngày 23/10/2026:** Worker preview Cloudflare cũ hiện không còn
+truy cập được; DNS trả `100::`, HTTPS status request thất bại và Wrangler
+chưa đăng nhập. Các model Qwen 3.8 27B, Moondream 3.1 và Whisper Large v3 Turbo
+đã chạy trên deployment trước đó, nhưng trạng thái cloud hiện chưa xác minh.
+Native app có iOS Speech fallback và client WebSocket cloud; Worker bật
+`voice_realtime_ready` mới được phép stream mic PCM. Nova-3 tiếng Việt realtime
+vẫn bị khóa tới khi kiểm thử trực tiếp xác nhận hỗ trợ.
 
 Native app có hành lang hình thang phủ lên camera, chỉ tính vật giao với vùng
 giữa và nằm trong tầm thử 2,5 m; vật xa hơn chỉ là ngữ cảnh. Địa chỉ cloud được
@@ -34,7 +36,7 @@ Simulator không có LiDAR iPhone; IPA chưa được ký, cài hoặc đo thử
 | Yêu cầu iOS | iOS 16 trở lên | Safari iOS hiện hành |
 | Camera iPhone | Có, chỉ mở ở mode **Chỉ dùng iPhone** | Có, khi mở qua HTTPS và cho phép Camera |
 | Khoảng cách LiDAR | ARKit `sceneDepth` khi runtime hỗ trợ; iPhone 12 Pro/12 Pro Max có LiDAR | Không có ARKit/sceneDepth. Khoảng cách luôn “chưa khả dụng”; không ước lượng mét từ ảnh |
-| Mic câu hỏi | Dictation hoặc hội thoại native bằng iOS Speech; transcript và ảnh mới gửi Cloudflare; Qwen trả lời theo stream, iPhone đọc câu trả lời | Speech Recognition Safari/iOS (cần Siri bật) hoặc Dictation bàn phím; Qwen trả lời theo stream |
+| Mic câu hỏi | Dictation hoặc hội thoại native: WebSocket PCM cloud nếu Worker bật, nếu không thì iOS Speech; Qwen trả lời theo stream, iPhone đọc câu trả lời | Speech Recognition Safari/iOS (cần Siri bật) hoặc Dictation bàn phím; Qwen trả lời theo stream |
 | ESP32 | BLE discovery/status/ToF/nút; FOMO cục bộ đang chờ artifact; Wi‑Fi/Flask lấy JPEG, FOMO snapshot và gọi Vision | Flask qua Wi‑Fi firmware hoặc USB bridge; không dùng BLE |
 | Đọc câu trả lời | `AVSpeechSynthesizer` trên iPhone | `speechSynthesis` của trình duyệt |
 
@@ -150,13 +152,14 @@ xác nhận có tiếng hay cảnh báo thật, và không bật MODE.
   `AVSpeechSynthesizer`; ở ESP32 mode, phát qua loa ESP32 là lựa chọn khác và
   cần firmware Wi-Fi hỗ trợ.
 - **Native voice conversation:** nút **Trò chuyện bằng giọng nói** cần quyền
-  Microphone và Speech Recognition. iPhone hiện transcript trực tiếp; thông
-  thường transcript và ảnh mới (nếu có) được gửi thẳng tới Qwen để giảm một
-  lượt chờ mạng. Nếu độ tin cậy nhận dạng iOS thấp hơn 0,45 hoặc không có điểm
-  tin cậy, app có thể gửi audio WAV ngắn tới Whisper trên Cloudflare để cải
-  thiện transcript trước khi hỏi Qwen. Ngưỡng này là heuristic, chưa hiệu
-  chuẩn trên iPhone thật. Audio không lưu trong D1. Đây là hội thoại từng lượt,
-  chưa full-duplex.
+  Microphone. Nếu Worker báo `voice_realtime_ready=true`, app truyền PCM mono
+  16 kHz cùng ảnh mới tùy chọn qua `/api/voice/realtime`; transcript và câu trả
+  lời Qwen về theo luồng. Nếu không sẵn sàng hoặc kết nối lỗi, app xin quyền
+  Speech Recognition và chuyển sang nhận dạng iOS. Transcript đủ tin cậy cùng
+  ảnh mới đi thẳng tới Qwen; khi confidence thấp hơn 0,45 hoặc chưa có confidence,
+  app có thể gửi WAV ngắn tới Whisper trên Cloudflare. Audio không được ghi vào
+  D1. Đây là hội thoại theo lượt, chưa full-duplex. Luồng Nova-3 tiếng Việt bị
+  khóa trong Worker cho tới khi được xác minh trên endpoint Cloudflare thật.
 - PWA có thêm tùy chọn ghi âm trong app khi backend đã cấu hình API phiên âm;
   nếu không, dùng Speech Recognition của Safari/iOS để nhận tiếng Việt và gửi
   phần chữ tới Qwen trên Cloudflare. PWA cần Safari qua HTTPS và bật Siri để

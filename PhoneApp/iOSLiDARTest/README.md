@@ -185,19 +185,25 @@ plus question to `/api/analyze` (Moondream detection plus Qwen 3.8 27B vision).
 The live request cadence is capped at one frame per second to limit cloud use.
 
 The cloud Worker does not expose `/api/device/*`; ESP32 mode still requires the
-local Flask backend and its USB/Wi-Fi bridge. The native app now has a Vietnamese
-voice conversation control in **Chỉ dùng iPhone** mode. iOS Speech Recognition
-produces partial transcripts for live feedback. After a short pause, the app
-normally sends the iOS transcript and, when fresh, the latest iPhone JPEG
-directly to `/api/voice/turn`, avoiding a second network round trip before
-Qwen. If average iOS segment confidence is below 0.45 or unavailable and the
-Worker reports Whisper Large v3 Turbo ready, the app first uses `/api/transcribe`
-to refine that utterance. Qwen 3.8 27B streams answer text back, and
-AVSpeechSynthesizer speaks sentence chunks before the microphone resumes. The
-confidence threshold is a latency/accuracy heuristic and still needs tuning
-from real Vietnamese speech on the target iPhone. The loop is turn-based, not
-full-duplex. The app requests Microphone and Speech Recognition permission; the
-Worker does not store audio in D1.
+local Flask backend and its USB/Wi-Fi bridge. Native **Chỉ dùng iPhone** voice
+checks `voice_realtime_ready` in `/api/status`. If enabled, it opens the
+authenticated `/api/voice/realtime` WebSocket, streams iPhone microphone audio
+as mono 16 kHz linear PCM, sends a fresh camera JPEG about every two seconds,
+and receives Vietnamese transcript plus streamed Qwen answer events. iPhone
+`AVSpeechSynthesizer` speaks response chunks, then the app starts listening
+again. If the route is absent or fails, it falls back to iOS Speech Recognition;
+confident transcripts and a fresh frame go to `/api/voice/turn`, and short WAV
+audio can go to `/api/transcribe` when average segment confidence is below 0.45
+or unavailable and Whisper is ready. This is turn-taking, not full-duplex. Raw
+microphone streaming is disclosed by the permission prompt and voice-screen
+privacy text. The Worker does not store audio or camera frames in D1.
+
+The realtime client is present but currently not exercised against a working
+cloud endpoint. The source Worker gates it behind
+`CF_VOICE_REALTIME_VI_CONFIRMED=true`; keep this false until Vietnamese
+streaming has been confirmed for the configured Cloudflare Gateway. The
+previous temporary `workers.dev` preview is unavailable and Wrangler is not
+authenticated on the current Windows environment.
 Safari's PWA also supports voice, but cannot read ARKit depth, so the native app
 is the path that pairs vision boxes with sceneDepth from the same camera frame.
 

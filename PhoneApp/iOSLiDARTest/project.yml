@@ -24,8 +24,8 @@ targets:
         CFBundleDisplayName: "Ro Sight"
         UIRequiresFullScreen: true
         NSCameraUsageDescription: "Ro Sight dùng camera sau và LiDAR để hiển thị cảnh trực tiếp và ước tính khoảng cách."
-        NSMicrophoneUsageDescription: "Ro Sight dùng Microphone iPhone để nhận câu hỏi tiếng Việt trong chế độ trò chuyện."
-        NSSpeechRecognitionUsageDescription: "Ro Sight nhận giọng nói tiếng Việt; audio có thể được gửi tới Whisper trên Cloudflare để phiên âm, rồi gửi transcript và câu hỏi tới trợ lý Qwen."
+        NSMicrophoneUsageDescription: "Ro Sight dùng Microphone iPhone để nhận câu hỏi tiếng Việt. Nếu thoại realtime cloud được bật, âm thanh được truyền tới Cloudflare và dịch vụ nhận dạng giọng nói; nếu không, app dùng Speech của iOS và có thể gửi đoạn audio ngắn tới Whisper khi nhận dạng chưa chắc. Transcript và ảnh mới có thể gửi tới trợ lý Qwen."
+        NSSpeechRecognitionUsageDescription: "Ro Sight dùng Speech của iOS làm phương án dự phòng khi thoại realtime cloud chưa sẵn sàng; nhận dạng chạy trên iPhone nếu được hỗ trợ, nếu không iOS có thể xử lý âm thanh qua dịch vụ Apple. Khi kết quả chưa chắc, app có thể gửi đoạn audio ngắn tới Whisper trên Cloudflare."
         NSBluetoothAlwaysUsageDescription: "Ro Sight dùng Bluetooth LE để tìm ESP32 và nhận trạng thái, số đo ToF cùng sự kiện nút."
         NSLocalNetworkUsageDescription: "Ro Sight dùng Flask để nhận ảnh, hỏi Vision và đọc trạng thái ESP32; YOLO trên máy tính chỉ dành cho prototype camera iPhone."
         NSAppTransportSecurity:

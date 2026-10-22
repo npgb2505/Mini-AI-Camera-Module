@@ -105,6 +105,9 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     @Published private(set) var phoneDetectorProvider: String?
     @Published private(set) var phoneTranscriptionReady: Bool?
     @Published private(set) var phoneTranscriptionModel: String?
+    @Published private(set) var phoneVoiceRealtimeReady: Bool?
+    @Published private(set) var phoneVoiceRealtimeModel: String?
+    @Published private(set) var phoneVoiceRealtimeNote: String?
 
     private var backendBaseURL = ""
     private var accountUsername = ""
@@ -150,6 +153,15 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     private var voiceSpeechBuffer = ""
     private var voiceSpeechUtteranceIDs: Set<ObjectIdentifier> = []
     private var voiceReplyStreamFinished = false
+    private var voiceRealtimeSocket: URLSessionWebSocketTask?
+    private var voiceRealtimeSocketWriter: RealtimeVoiceSocketWriter?
+    private var voiceRealtimeReceiveTask: Task<Void, Never>?
+    private var voiceRealtimeFrameTask: Task<Void, Never>?
+    private var voiceRealtimeHandshakeTimeoutTask: Task<Void, Never>?
+    private var voiceRealtimePCMEncoder: RealtimeVoicePCMEncoder?
+    private var voiceRealtimeSessionReady = false
+    private var voiceRealtimeFailedForSession = false
+    private let voiceRealtimeSendQueue = DispatchQueue(label: "vn.khiemthi.rosight.voice.websocket")
 
     @Published private(set) var deviceConnection: DeviceConnectionPayload?
     @Published private(set) var deviceFrameData: Data?
@@ -319,6 +331,9 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             phoneDetectorProvider = nil
             phoneTranscriptionReady = nil
             phoneTranscriptionModel = nil
+            phoneVoiceRealtimeReady = nil
+            phoneVoiceRealtimeModel = nil
+            phoneVoiceRealtimeNote = nil
             deviceConnection = nil
             deviceError = nil
             deviceAskError = nil
@@ -507,6 +522,15 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         case .none:
             return "Chưa xác minh detector của backend cho camera iPhone. FOMO cục bộ ESP32 vẫn chờ artifact đã huấn luyện."
         }
+    }
+
+    var phoneVoicePathDescription: String {
+        if phoneVoiceRealtimeReady == true {
+            return "Khi luồng realtime báo sẵn sàng, tiếng Microphone được truyền tới Cloudflare/Deepgram để nhận dạng; câu hỏi và ảnh mới có thể gửi tới Qwen. Nếu luồng lỗi, app chuyển sang Speech của iPhone."
+        }
+        let note = phoneVoiceRealtimeNote?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let availability = note.map { $0.isEmpty ? "" : " " + $0 } ?? ""
+        return "Hiện cloud chưa xác nhận nhận dạng tiếng Việt realtime. Speech của iPhone nhận câu nói; transcript và ảnh mới gửi tới Qwen. Khi nhận dạng chưa chắc, app có thể gửi đoạn audio ngắn tới Whisper trên Cloudflare.\(availability)"
     }
 
     private func speakOnPhone(_ text: String, isAnswer: Bool, isProximityAlert: Bool) {
@@ -1695,11 +1719,13 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             voiceStatus = "Nhập URL Cloudflare và đăng nhập trong Cài đặt trước."
             return
         }
-        if phoneTranscriptionReady == nil {
-            voiceStatus = "Đang kiểm tra phiên âm cloud…"
+        if phoneTranscriptionReady == nil || phoneVoiceRealtimeReady == nil {
+            voiceStatus = "Đang kiểm tra khả năng thoại cloud…"
             await refreshVisionCapabilitiesIfNeeded(force: true)
         }
-        guard let recognizer = vietnameseSpeechRecognizer else {
+        let useRealtimeCloud = phoneVoiceRealtimeReady == true
+        let recognizer = vietnameseSpeechRecognizer
+        if !useRealtimeCloud, recognizer == nil {
             voiceStatus = "iPhone hiện không có bộ nhận dạng giọng nói tiếng Việt."
             return
         }
@@ -1707,23 +1733,35 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         voiceSessionGeneration += 1
         let requestedVoiceGeneration = voiceSessionGeneration
         isVoiceConnecting = true
-        voiceStatus = "Đang xin quyền Microphone và Speech…"
-        defer { isVoiceConnecting = false }
-
-        let speechAuthorization = await requestVoiceSpeechAuthorization()
-        guard requestedVoiceGeneration == voiceSessionGeneration else { return }
-        guard speechAuthorization == .authorized else {
-            voiceStatus = "Cần cho phép Nhận dạng giọng nói trong iPhone để bắt đầu."
-            return
+        voiceStatus = useRealtimeCloud
+            ? "Đang xin quyền Microphone để mở thoại realtime cloud…"
+            : "Đang xin quyền Microphone và Speech…"
+        var waitForRealtimeHandshake = false
+        defer {
+            if !waitForRealtimeHandshake { isVoiceConnecting = false }
         }
+
+        if !useRealtimeCloud {
+            let speechAuthorization = await requestVoiceSpeechAuthorization()
+            guard requestedVoiceGeneration == voiceSessionGeneration else { return }
+            guard speechAuthorization == .authorized else {
+                voiceStatus = "Cần cho phép Nhận dạng giọng nói trong iPhone để bắt đầu."
+                return
+            }
+            guard let recognizer else {
+                voiceStatus = "iPhone hiện không có bộ nhận dạng giọng nói tiếng Việt."
+                return
+            }
+            guard recognizer.isAvailable else {
+                voiceStatus = "Dịch vụ nhận tiếng Việt của iPhone đang ngoại tuyến hoặc bận."
+                return
+            }
+        }
+
         let microphoneAuthorized = await requestVoiceMicrophoneAuthorization()
         guard requestedVoiceGeneration == voiceSessionGeneration else { return }
         guard microphoneAuthorized else {
             voiceStatus = "Cần cho phép Microphone trong iPhone để bắt đầu."
-            return
-        }
-        guard recognizer.isAvailable else {
-            voiceStatus = "Dịch vụ nhận tiếng Việt của iPhone đang ngoại tuyến hoặc bận."
             return
         }
         guard phoneModeActive, requestedVoiceGeneration == voiceSessionGeneration else { return }
@@ -1736,13 +1774,26 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         latestVoiceTranscript = ""
         latestVoiceTranscriptConfidence = nil
         voiceHistory = []
-        if phoneTranscriptionReady == true {
-            voiceStatus = "Đang nghe tiếng Việt trực tiếp; Whisper cloud sẽ hỗ trợ nếu nhận dạng chưa chắc."
-        } else {
-            voiceStatus = recognizer.supportsOnDeviceRecognition
-                ? "Đang nghe tiếng Việt; dùng Speech của iPhone vì phiên âm cloud chưa sẵn sàng."
-                : "Đang nghe tiếng Việt bằng Speech của iPhone; transcript và ảnh mới được gửi tới Cloudflare."
+
+        if useRealtimeCloud {
+            voiceStatus = phoneVoiceRealtimeModel.map { "Đang mở luồng Microphone tới \($0)…" }
+                ?? "Đang mở luồng Microphone tới nhận dạng tiếng Việt trên cloud…"
+            waitForRealtimeHandshake = true
+            do {
+                try await connectRealtimeVoiceSession(generation: requestedVoiceGeneration)
+            } catch {
+                waitForRealtimeHandshake = false
+                await fallbackToOnDeviceVoice(
+                    reason: userFacingErrorMessage(error, fallback: "Không mở được thoại realtime cloud."),
+                    generation: requestedVoiceGeneration
+                )
+            }
+            return
         }
+
+        voiceStatus = phoneTranscriptionReady == true
+            ? "Đang nghe tiếng Việt trên iPhone; Whisper cloud hỗ trợ khi nhận dạng chưa chắc."
+            : "Đang nghe bằng Speech của iPhone; transcript và ảnh mới được gửi tới trợ lý cloud."
         do {
             try startVoiceRecognition()
         } catch {
@@ -1760,6 +1811,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         voiceDebounceTask?.cancel()
         voiceDebounceTask = nil
         stopVoiceCapture()
+        stopRealtimeVoiceSession()
         if !voiceSpeechUtteranceIDs.isEmpty {
             speechSynthesizer.stopSpeaking(at: .immediate)
             voiceSpeechUtteranceIDs.removeAll()
@@ -1772,6 +1824,338 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         isVoiceThinking = false
         deactivateSpeechSession()
         voiceStatus = "Đã kết thúc hội thoại giọng nói."
+    }
+
+    private func connectRealtimeVoiceSession(generation: Int) async throws {
+        try await ensureAuthenticated()
+        guard generation == voiceSessionGeneration,
+              isVoiceConversationActive else { return }
+
+        let httpURL = try makeEndpoint("voice/realtime")
+        guard var socketComponents = URLComponents(url: httpURL, resolvingAgainstBaseURL: false),
+              var originComponents = URLComponents(url: httpURL, resolvingAgainstBaseURL: false) else {
+            throw APIError.message("Không tạo được địa chỉ thoại realtime.")
+        }
+        socketComponents.scheme = socketComponents.scheme?.lowercased() == "https" ? "wss" : "ws"
+        guard let socketURL = socketComponents.url else {
+            throw APIError.message("Địa chỉ thoại realtime không hợp lệ.")
+        }
+        originComponents.path = ""
+        originComponents.query = nil
+        originComponents.fragment = nil
+        guard let origin = originComponents.string else {
+            throw APIError.message("Không xác định được nguồn của backend.")
+        }
+
+        var request = URLRequest(url: socketURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        request.setValue(origin, forHTTPHeaderField: "Origin")
+        applyAccessAuthorization(to: &request)
+        if let cookies = HTTPCookieStorage.shared.cookies(for: httpURL), !cookies.isEmpty {
+            let cookieHeader = HTTPCookie.requestHeaderFields(with: cookies)["Cookie"]
+            if let cookieHeader { request.setValue(cookieHeader, forHTTPHeaderField: "Cookie") }
+        }
+
+        let socket = URLSession.shared.webSocketTask(with: request)
+        voiceRealtimeSocket = socket
+        voiceRealtimeSessionReady = false
+        voiceRealtimeFailedForSession = false
+        let writer = RealtimeVoiceSocketWriter(
+            socket: socket,
+            queue: voiceRealtimeSendQueue,
+            onFailure: { [weak self] error in
+                Task { @MainActor [weak self] in
+                    self?.handleRealtimeVoiceDisconnect(error, generation: generation)
+                }
+            }
+        )
+        voiceRealtimeSocketWriter = writer
+        socket.resume()
+        voiceRealtimeReceiveTask?.cancel()
+        voiceRealtimeReceiveTask = Task { [weak self] in
+            guard let self else { return }
+            await self.receiveRealtimeVoiceMessages(socket: socket, generation: generation)
+        }
+        voiceRealtimeHandshakeTimeoutTask?.cancel()
+        voiceRealtimeHandshakeTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 12_000_000_000)
+            guard let self,
+                  generation == self.voiceSessionGeneration,
+                  self.isVoiceConnecting,
+                  !self.voiceRealtimeSessionReady else { return }
+            await self.fallbackToOnDeviceVoice(
+                reason: "Cloud thoại chưa xác nhận phiên trong 12 giây.",
+                generation: generation
+            )
+        }
+
+        let startMessage = try Self.jsonString(["type": "start", "language": "vi"])
+        writer.send(.string(startMessage))
+    }
+
+    private func receiveRealtimeVoiceMessages(socket: URLSessionWebSocketTask, generation: Int) async {
+        do {
+            while !Task.isCancelled {
+                let message = try await socket.receive()
+                guard generation == voiceSessionGeneration,
+                      voiceRealtimeSocket === socket else { return }
+                guard case let .string(text) = message,
+                      let data = text.data(using: .utf8),
+                      let event = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let type = event["type"] as? String else { continue }
+                handleRealtimeVoiceEvent(type: type, event: event, generation: generation)
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            handleRealtimeVoiceDisconnect(error, generation: generation)
+        }
+    }
+
+    private func handleRealtimeVoiceEvent(type: String, event: [String: Any], generation: Int) {
+        guard generation == voiceSessionGeneration,
+              isVoiceConversationActive else { return }
+        switch type {
+        case "session_ready":
+            guard !voiceRealtimeSessionReady,
+                  let socket = voiceRealtimeSocket else { return }
+            voiceRealtimeHandshakeTimeoutTask?.cancel()
+            voiceRealtimeSessionReady = true
+            isVoiceConnecting = false
+            phoneVoiceRealtimeModel = event["stt_model"] as? String ?? phoneVoiceRealtimeModel
+            startRealtimeVoiceFramePump(generation: generation)
+            do {
+                try startRealtimeVoiceCapture(socket: socket, generation: generation)
+            } catch {
+                Task { @MainActor [weak self] in
+                    await self?.fallbackToOnDeviceVoice(
+                        reason: userFacingErrorMessage(error, fallback: "Không mở được Microphone cho thoại cloud."),
+                        generation: generation
+                    )
+                }
+            }
+        case "transcript":
+            let transcript = (event["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !transcript.isEmpty else { return }
+            voiceTranscript = transcript
+            latestVoiceTranscript = transcript
+            voiceStatus = "Đang nhận dạng tiếng Việt trực tiếp trên cloud…"
+            if event["final"] as? Bool == true, !isVoiceThinking {
+                stopVoiceCapture()
+                voiceRealtimeFrameTask?.cancel()
+                voiceRealtimeFrameTask = nil
+                isVoiceListening = false
+                isVoiceThinking = true
+                answer = ""
+                voiceSpeechBuffer = ""
+                voiceReplyStreamFinished = false
+                voiceStatus = "Đã nhận câu nói; đang hỏi trợ lý cloud…"
+            }
+        case "assistant_start":
+            if !isVoiceThinking {
+                stopVoiceCapture()
+                voiceRealtimeFrameTask?.cancel()
+                voiceRealtimeFrameTask = nil
+            }
+            isVoiceListening = false
+            isVoiceThinking = true
+            answer = ""
+            voiceSpeechBuffer = ""
+            voiceReplyStreamFinished = false
+            voiceStatus = "Đang tạo câu trả lời tiếng Việt trên cloud…"
+        case "assistant_delta":
+            let delta = event["text"] as? String ?? ""
+            guard !delta.isEmpty else { return }
+            isVoiceThinking = true
+            answer += delta
+            voiceStatus = "Đang trả lời bằng giọng nói…"
+            queueVoiceSpeech(delta, flush: false)
+        case "assistant_done":
+            let fullText = (event["text"] as? String ?? answer).trimmingCharacters(in: .whitespacesAndNewlines)
+            answer = fullText
+            if !latestVoiceTranscript.isEmpty, !fullText.isEmpty {
+                voiceHistory = Array((voiceHistory + [
+                    ["role": "user", "content": latestVoiceTranscript],
+                    ["role": "assistant", "content": fullText]
+                ]).suffix(8))
+            }
+            voiceReplyStreamFinished = true
+            queueVoiceSpeech("", flush: true)
+            finishVoiceReplyIfReady()
+        case "voice_error":
+            let message = event["message"] as? String ?? "Luồng thoại cloud gặp lỗi."
+            if !voiceRealtimeSessionReady || !isVoiceThinking {
+                Task { @MainActor [weak self] in
+                    await self?.fallbackToOnDeviceVoice(reason: message, generation: generation)
+                }
+            } else {
+                voiceStatus = message
+                if isVoiceThinking {
+                    isVoiceThinking = false
+                    voiceReplyStreamFinished = true
+                    queueVoiceSpeech("", flush: true)
+                    finishVoiceReplyIfReady()
+                } else if !isVoiceListening, let socket = voiceRealtimeSocket {
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(nanoseconds: 450_000_000)
+                        guard let self,
+                              generation == self.voiceSessionGeneration,
+                              self.voiceRealtimeSessionReady,
+                              !self.isVoiceThinking,
+                              !self.isVoiceListening else { return }
+                        try? self.startRealtimeVoiceCapture(socket: socket, generation: generation)
+                    }
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    private func startRealtimeVoiceCapture(socket: URLSessionWebSocketTask, generation: Int) throws {
+        guard isVoiceConversationActive,
+              voiceRealtimeSessionReady,
+              !voiceRealtimeFailedForSession,
+              !voiceAudioTapInstalled else { return }
+
+        let audioSession = AVAudioSession.sharedInstance()
+        try audioSession.setCategory(.playAndRecord,
+                                     mode: .voiceChat,
+                                     options: [.defaultToSpeaker, .allowBluetooth])
+        try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
+        speechSessionActive = true
+
+        let input = voiceAudioEngine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.channelCount > 0,
+              format.sampleRate > 0,
+              let encoder = RealtimeVoicePCMEncoder(sourceFormat: format),
+              let writer = voiceRealtimeSocketWriter,
+              voiceRealtimeSocket === socket else {
+            throw APIError.message("Không thể chuyển Microphone iPhone sang PCM 16 kHz.")
+        }
+        voiceRealtimePCMEncoder = encoder
+        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
+            for packet in encoder.append(buffer) {
+                writer.send(.data(packet))
+            }
+        }
+        voiceAudioTapInstalled = true
+        voiceAudioEngine.prepare()
+        try voiceAudioEngine.start()
+        isVoiceListening = true
+        isVoiceThinking = false
+        voiceStatus = "Đang nghe tiếng Việt trực tiếp trên cloud…"
+    }
+
+    private func startRealtimeVoiceFramePump(generation: Int) {
+        voiceRealtimeFrameTask?.cancel()
+        voiceRealtimeFrameTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled,
+                  generation == self.voiceSessionGeneration,
+                  self.isVoiceConversationActive,
+                  self.voiceRealtimeSessionReady {
+                self.sendFreshFrameToRealtimeVoice()
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
+    private func sendFreshFrameToRealtimeVoice() {
+        guard let image = latestJPEG,
+              let capturedAt = latestJPEGAt,
+              Date().timeIntervalSince(capturedAt) <= Self.phoneFrameFreshnessSeconds,
+              image.count <= 360_000,
+              let writer = voiceRealtimeSocketWriter else { return }
+        let dataURL = "data:image/jpeg;base64," + image.base64EncodedString()
+        guard dataURL.utf8.count < 500_000,
+              let message = try? Self.jsonString(["type": "frame", "data": dataURL]) else { return }
+        writer.send(.string(message))
+    }
+
+    private func handleRealtimeVoiceDisconnect(_ error: Error, generation: Int) {
+        guard generation == voiceSessionGeneration,
+              isVoiceConversationActive,
+              !voiceRealtimeFailedForSession else { return }
+        Task { @MainActor [weak self] in
+            await self?.fallbackToOnDeviceVoice(
+                reason: userFacingErrorMessage(error, fallback: "Luồng thoại realtime đã ngắt."),
+                generation: generation
+            )
+        }
+    }
+
+    private func fallbackToOnDeviceVoice(reason: String, generation: Int) async {
+        guard generation == voiceSessionGeneration,
+              isVoiceConversationActive,
+              !voiceRealtimeFailedForSession else { return }
+        voiceRealtimeFailedForSession = true
+        voiceRealtimeSessionReady = false
+        voiceRealtimeHandshakeTimeoutTask?.cancel()
+        voiceRealtimeFrameTask?.cancel()
+        voiceRealtimeFrameTask = nil
+        voiceRealtimeReceiveTask?.cancel()
+        voiceRealtimeReceiveTask = nil
+        if let socket = voiceRealtimeSocket {
+            socket.cancel(with: .goingAway, reason: nil)
+        }
+        voiceRealtimeSocket = nil
+        voiceRealtimeSocketWriter = nil
+        stopVoiceCapture()
+        isVoiceConnecting = false
+        voiceStatus = "Cloud realtime chưa sẵn sàng (\(reason)); đang chuyển sang Speech của iPhone…"
+
+        if isVoiceThinking || !voiceSpeechUtteranceIDs.isEmpty {
+            isVoiceThinking = false
+            voiceReplyStreamFinished = true
+            queueVoiceSpeech("", flush: true)
+            finishVoiceReplyIfReady()
+            return
+        }
+        await startOnDeviceVoiceFallback(generation: generation)
+    }
+
+    private func startOnDeviceVoiceFallback(generation: Int) async {
+        guard generation == voiceSessionGeneration,
+              isVoiceConversationActive,
+              !isVoiceThinking,
+              !isVoiceListening else { return }
+        let speechAuthorization = await requestVoiceSpeechAuthorization()
+        guard generation == voiceSessionGeneration,
+              isVoiceConversationActive else { return }
+        guard speechAuthorization == .authorized else {
+            isVoiceConversationActive = false
+            voiceStatus = "Cloud realtime chưa sẵn sàng; cần cho phép Speech iPhone để dùng phương án dự phòng."
+            return
+        }
+        guard let recognizer = vietnameseSpeechRecognizer, recognizer.isAvailable else {
+            isVoiceConversationActive = false
+            voiceStatus = "Cloud realtime chưa sẵn sàng và Speech tiếng Việt trên iPhone đang ngoại tuyến."
+            return
+        }
+        do {
+            try startVoiceRecognition()
+            voiceStatus = "Đang nghe bằng Speech của iPhone; câu nói và ảnh mới được gửi tới trợ lý cloud."
+        } catch {
+            isVoiceConversationActive = false
+            voiceStatus = userFacingErrorMessage(error, fallback: "Chưa mở lại được Microphone trên iPhone.")
+        }
+    }
+
+    private func stopRealtimeVoiceSession() {
+        voiceRealtimeHandshakeTimeoutTask?.cancel()
+        voiceRealtimeHandshakeTimeoutTask = nil
+        voiceRealtimeFrameTask?.cancel()
+        voiceRealtimeFrameTask = nil
+        voiceRealtimeReceiveTask?.cancel()
+        voiceRealtimeReceiveTask = nil
+        if let socket = voiceRealtimeSocket {
+            socket.cancel(with: .normalClosure, reason: nil)
+        }
+        voiceRealtimeSocket = nil
+        voiceRealtimeSocketWriter = nil
+        voiceRealtimePCMEncoder = nil
+        voiceRealtimeSessionReady = false
+        voiceRealtimeFailedForSession = false
     }
 
     private func requestVoiceSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
@@ -1919,6 +2303,11 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
     private func stopVoiceCapture(preserveAudioForTurn: Bool = false) {
         voiceRecognitionGeneration += 1
+        if let finalPacket = voiceRealtimePCMEncoder?.finish(),
+           let writer = voiceRealtimeSocketWriter {
+            writer.send(.data(finalPacket))
+        }
+        voiceRealtimePCMEncoder = nil
         if voiceAudioEngine.isRunning { voiceAudioEngine.stop() }
         if voiceAudioTapInstalled {
             voiceAudioEngine.inputNode.removeTap(onBus: 0)
@@ -2168,9 +2557,18 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             try? await Task.sleep(nanoseconds: 650_000_000)
             guard let self,
                   self.isVoiceConversationActive,
-                  !self.isVoiceThinking else { return }
+                  !self.isVoiceThinking,
+                  !self.isVoiceListening else { return }
             do {
-                try self.startVoiceRecognition()
+                if let socket = self.voiceRealtimeSocket,
+                   self.voiceRealtimeSessionReady,
+                   !self.voiceRealtimeFailedForSession {
+                    try self.startRealtimeVoiceCapture(socket: socket, generation: self.voiceSessionGeneration)
+                } else if self.voiceRealtimeFailedForSession {
+                    await self.startOnDeviceVoiceFallback(generation: self.voiceSessionGeneration)
+                } else {
+                    try self.startVoiceRecognition()
+                }
             } catch {
                 self.voiceStatus = userFacingErrorMessage(error, fallback: "Chưa mở lại được Microphone.")
                 self.isVoiceConversationActive = false
@@ -2299,6 +2697,9 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             phoneDetectorProvider = payload.detectorProvider
             phoneTranscriptionReady = payload.transcriptionReady
             phoneTranscriptionModel = payload.transcriptionModel
+            phoneVoiceRealtimeReady = payload.voiceRealtimeReady
+            phoneVoiceRealtimeModel = payload.voiceSttModel
+            phoneVoiceRealtimeNote = payload.voiceRealtimeNote
         } catch {
             if !Task.isCancelled {
                 deviceVisionReady = nil
@@ -2308,6 +2709,9 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                 phoneDetectorProvider = nil
                 phoneTranscriptionReady = nil
                 phoneTranscriptionModel = nil
+                phoneVoiceRealtimeReady = nil
+                phoneVoiceRealtimeModel = nil
+                phoneVoiceRealtimeNote = nil
             }
         }
     }
@@ -2503,6 +2907,14 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         return url
     }
 
+    private static func jsonString(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object)
+        guard let value = String(data: data, encoding: .utf8) else {
+            throw APIError.message("Không mã hóa được tin nhắn thoại realtime.")
+        }
+        return value
+    }
+
     private static func decode<T: Decodable>(
         _ type: T.Type,
         data: Data,
@@ -2677,6 +3089,98 @@ private final class VoiceAudioCapture: @unchecked Sendable {
         pcm16Mono.removeAll(keepingCapacity: false)
         sampleRate = 0
         return wav
+    }
+}
+
+private final class RealtimeVoiceSocketWriter: @unchecked Sendable {
+    private let socket: URLSessionWebSocketTask
+    private let queue: DispatchQueue
+    private let onFailure: (Error) -> Void
+
+    init(socket: URLSessionWebSocketTask, queue: DispatchQueue, onFailure: @escaping (Error) -> Void) {
+        self.socket = socket
+        self.queue = queue
+        self.onFailure = onFailure
+    }
+
+    func send(_ message: URLSessionWebSocketTask.Message) {
+        queue.async { [socket, onFailure] in
+            socket.send(message) { error in
+                if let error { onFailure(error) }
+            }
+        }
+    }
+}
+
+private final class RealtimeVoicePCMEncoder: @unchecked Sendable {
+    private static let outputSampleRate = 16_000.0
+    private static let packetByteCount = 3_200 // 100 ms, mono signed 16-bit PCM.
+
+    private let lock = NSLock()
+    private let converter: AVAudioConverter
+    private let outputFormat: AVAudioFormat
+    private var pendingPCM = Data()
+
+    init?(sourceFormat: AVAudioFormat) {
+        guard let outputFormat = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: Self.outputSampleRate,
+            channels: 1,
+            interleaved: false
+        ), let converter = AVAudioConverter(from: sourceFormat, to: outputFormat) else {
+            return nil
+        }
+        self.outputFormat = outputFormat
+        self.converter = converter
+    }
+
+    func append(_ source: AVAudioPCMBuffer) -> [Data] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let ratio = Self.outputSampleRate / source.format.sampleRate
+        let capacity = AVAudioFrameCount(max(64, ceil(Double(source.frameLength) * ratio) + 64))
+        guard source.frameLength > 0,
+              let output = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else {
+            return []
+        }
+
+        var suppliedInput = false
+        var conversionError: NSError?
+        let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
+            guard !suppliedInput else {
+                inputStatus.pointee = .noDataNow
+                return nil
+            }
+            suppliedInput = true
+            inputStatus.pointee = .haveData
+            return source
+        }
+        guard status != .error,
+              output.frameLength > 0,
+              let channels = output.int16ChannelData else { return [] }
+
+        for index in 0..<Int(output.frameLength) {
+            let bits = UInt16(bitPattern: channels[0][index].littleEndian)
+            pendingPCM.append(UInt8(bits & 0x00ff))
+            pendingPCM.append(UInt8((bits >> 8) & 0x00ff))
+        }
+
+        var packets: [Data] = []
+        while pendingPCM.count >= Self.packetByteCount {
+            packets.append(Data(pendingPCM.prefix(Self.packetByteCount)))
+            pendingPCM.removeSubrange(..<Self.packetByteCount)
+        }
+        return packets
+    }
+
+    func finish() -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !pendingPCM.isEmpty else { return nil }
+        let remainder = pendingPCM
+        pendingPCM.removeAll(keepingCapacity: false)
+        return remainder
     }
 }
 
