@@ -32,7 +32,12 @@ final class PhoneModeUITests: XCTestCase {
         XCTAssertTrue(displayName.waitForExistence(timeout: 5))
         XCTAssertTrue(app.textFields["account.registration.username"].exists)
         XCTAssertTrue(app.secureTextFields["account.registration.password"].exists)
-        XCTAssertTrue(app.secureTextFields["account.registration.code"].exists)
-        XCTAssertTrue(app.buttons["account.registration.submit"].exists)
+        let registrationCode = app.secureTextFields["account.registration.code"]
+        let submit = app.buttons["account.registration.submit"]
+        for _ in 0..<5 where !submit.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(registrationCode.waitForExistence(timeout: 5))
+        XCTAssertTrue(submit.waitForExistence(timeout: 5))
     }
 }
