@@ -183,7 +183,7 @@ The native **Chỉ dùng iPhone** mode uses the live Cloudflare Worker for
 cloud detection and image questions while ARKit supplies depth locally. The
 active URL is prefilled in native settings. Create a Ro Sight account directly
 in **Cài đặt backend → Tạo tài khoản Cloudflare** with the registration code
-provided for this deployment; the code is used once and is not saved. The
+provided for this deployment; the app does not save the code. The
 username is kept in app preferences and the password is stored in this iPhone's
 Keychain. Leave
 the optional tunnel Basic Auth fields blank. Select **Chỉ dùng iPhone**. The app
