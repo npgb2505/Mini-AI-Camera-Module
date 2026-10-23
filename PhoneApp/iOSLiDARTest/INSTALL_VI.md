@@ -5,13 +5,13 @@ miễn phí. Không cần sở hữu Mac. **PWA là đường thử ngay**; nati
 được build trên runner macOS của GitHub Actions rồi ký trên Windows trước khi
 cài.
 
-**Tình trạng ngày 23/10/2026:** URL preview trước đây
-`https://ro-mobile-assistant-preview.slimy-kettle.workers.dev` hiện lỗi phân
-giải DNS khi kiểm tra; chưa có endpoint cloud hoạt động được xác nhận. Mã
-Worker local build `20261023-cloudflare-voice-vi-v9` đã dùng Workers AI Nova-3
-trực tiếp, không cần AI Gateway/API key, nhưng chưa deploy vì Wrangler chưa
-đăng nhập. App vẫn điền URL preview cũ nên cần deploy endpoint mới trước khi
-thử cloud trên iPhone. D1 và secrets đã tạo trước đây; claim window tạm đã qua.
+**Tình trạng ngày 23/10/2026:** Worker đang chạy tại
+`https://ro-mobile-assistant.gfgfhtrffg.workers.dev`. D1 mới đã được tạo và
+migration khởi tạo đã chạy; `SESSION_SECRET` và mã đăng ký đã được cấu hình.
+`/api/status` trả lời thành công và quảng bá Qwen, Moondream, Whisper, Nova-3.
+Điều đó mới xác nhận Worker/binding trả trạng thái, chưa xác nhận suy luận AI,
+chất lượng thoại tiếng Việt hoặc hoạt động trên iPhone thật. App native nay
+điền URL đang chạy và tự chuyển ba địa chỉ preview cũ sang URL đó.
 
 Đo trên preview lần trước: ảnh Simulator được Qwen trả lời trong 6,6 giây,
 token đầu của lượt thoại văn bản sau 1,7 giây và hoàn tất sau 2,4 giây. Đây là
@@ -29,8 +29,10 @@ Các ngưỡng khoảng cách vẫn cần đo lại trên iPhone 12 Pro Max th�
 Native app và workflow đã được đẩy lên fork công khai
 `npgb2505/Mini-AI-Camera-Module`; repo gốc vẫn chỉ có quyền đọc. GitHub Actions
 run [39886118187](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39886118187)
-đã thành công sau 6m29s: 11 kiểm tra depth, 2 UI test: điều hướng chế độ iPhone và hiển thị form tạo tài khoản,
-mở app trên iPhone Simulator và build/upload IPA unsigned. Bản mới có nút kiểm tra backend/model trong Cài đặt. IPA mới nhất nằm ở
+đã thành công sau 6m29s: 11 kiểm tra depth, 2 UI test (điều hướng chế độ iPhone
+và hiển thị form tạo tài khoản), mở app trên iPhone Simulator và build/upload
+IPA unsigned. Bản đó có nút kiểm tra backend/model trong Cài đặt. IPA được tạo
+trước khi Worker hoạt động, nên cần build lại để đóng gói URL mới. IPA cũ nằm ở
 `../../../04_App/ios_builds/2026-10-23-run-39886118187/RoSight-unsigned.ipa`
 (684.362 byte, SHA-256 `906A4895DED9CF1CD44A7A68530389E9BB7C4FB0FBADBD3A2DFF5290AA6A1F21`).
 Ảnh khởi chạy Simulator nằm ở

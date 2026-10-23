@@ -179,12 +179,13 @@ one second without a newer depth update.
 
 ### Cloudflare phone backend
 
-The native **Chỉ dùng iPhone** mode can use the Cloudflare Worker preview for
+The native **Chỉ dùng iPhone** mode uses the live Cloudflare Worker for
 cloud detection and image questions while ARKit supplies depth locally. The
-current preview URL is prefilled in native settings. Create a Ro Sight account
-directly in **Cài đặt backend → Tạo tài khoản Cloudflare** with the preview
-registration code; the code is used once and is not saved. The username is kept
-in app preferences and the password is stored in this iPhone's Keychain. Leave
+active URL is prefilled in native settings. Create a Ro Sight account directly
+in **Cài đặt backend → Tạo tài khoản Cloudflare** with the registration code
+provided for this deployment; the code is used once and is not saved. The
+username is kept in app preferences and the password is stored in this iPhone's
+Keychain. Leave
 the optional tunnel Basic Auth fields blank. Select **Chỉ dùng iPhone**. The app
 logs into `/api/auth/login`, reads `/api/status`,
 sends detector frames to `/api/detect` (Moondream 3.1), and sends a fresh image
@@ -214,22 +215,25 @@ not full-duplex. Raw microphone upload is disclosed by the permission prompt
 and voice-screen privacy text. The Worker does not store audio or camera frames
 in D1.
 
-The last temporary preview URL was
-`https://ro-mobile-assistant-preview.slimy-kettle.workers.dev`. A status request
-on October 23, 2026 failed DNS resolution, so this is not a confirmed live
-endpoint now. The app still defaults to that URL and migrates both retired
-preview URLs on launch; it needs an authenticated deployment before it can
-connect. The last known preview run answered a Simulator screenshot with Qwen
-Vision in 6.6 seconds; a text voice turn streamed its first Qwen delta in 1.7
-seconds and completed in 2.4 seconds. These are single network measurements,
-not iPhone microphone latency.
+The active Worker endpoint is
+`https://ro-mobile-assistant.gfgfhtrffg.workers.dev`. It was deployed on October
+23, 2026 with the `ro-mobile-assistant` D1 database and its initial migration.
+A live `/api/status` request succeeded and advertises the Cloudflare AI models,
+Whisper, Nova-3, and registration-code protection. This confirms the Worker and
+bindings respond; it does not yet confirm successful model inference or a real
+iPhone microphone session. The native app defaults to this endpoint and moves
+the three retired preview hosts to it on launch. An earlier preview answered a
+Simulator screenshot with Qwen Vision in 6.6 seconds; a text voice turn streamed
+its first Qwen delta in 1.7 seconds and completed in 2.4 seconds. Those are
+single preview measurements, not latency measurements of the active Worker or
+iPhone microphone.
 
-Worker source build `20261023-cloudflare-voice-vi-v9` now opens Nova-3 directly
-through the Workers AI binding; it needs no AI Gateway or Deepgram key. The
-route is enabled by the binding and the iPhone falls back to on-device Speech
-plus Whisper if the cloud WebSocket fails. The source is not deployed because
-the Wrangler session is not authenticated. Deepgram lists Vietnamese (`vi`)
-for Nova-3, while its October 5, 2026 release only calls out a batch-model
+Worker source build `20261023-cloudflare-voice-vi-v9` is deployed and opens
+Nova-3 directly through the Workers AI binding; it needs no AI Gateway or
+Deepgram key. The route is advertised by `/api/status`, and the iPhone falls
+back to on-device Speech plus Whisper if the cloud WebSocket fails. A real
+Vietnamese microphone session is still unverified. Deepgram lists Vietnamese
+(`vi`) for Nova-3, while its October 5, 2026 release only calls out a batch-model
 improvement for Vietnamese. Real-time transcription quality still needs a
 real-phone test. This is turn-taking, not full-duplex. Cloudflare model
 inference remains off the iPhone; ARKit LiDAR and camera capture stay on the
