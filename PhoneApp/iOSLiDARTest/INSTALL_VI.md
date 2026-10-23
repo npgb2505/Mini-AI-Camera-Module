@@ -151,6 +151,13 @@ tính có thể truy cập từ điện thoại hoặc URL HTTPS có xác thực
 Basic Auth, nhập thông tin tunnel trong trường riêng. Đừng gửi thông tin đăng
 nhập qua HTTP trên mạng không tin cậy.
 
+Trong Cài đặt, bấm **Kiểm tra backend** để kiểm tra URL và đọc tên/trạng thái
+Vision, detector, phiên âm và thoại realtime. Kiểm tra này gọi `/api/status`,
+không cần đăng nhập Ro Sight và không gửi ảnh hoặc chạy inference. Kết quả
+“sẵn sàng” là trạng thái backend khai báo; chỉ một lượt hỏi ảnh/nhận diện thật
+mới xác nhận model suy luận được. Nếu URL preview lỗi DNS, cần deploy Worker mới
+rồi thay URL tại đây.
+
 Chế độ **Chỉ dùng iPhone** gửi ảnh và câu hỏi tới `/api/analyze`; khi có kết quả
 detector gần đây, app gửi kèm đúng ảnh detector đã phân tích và ước lượng LiDAR
 trong từng box để Qwen trả lời có ngữ cảnh hơn. Số đo tại tâm ảnh được ghi rõ

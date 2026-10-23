@@ -118,6 +118,9 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     @Published private(set) var phoneVoiceRealtimeReady: Bool?
     @Published private(set) var phoneVoiceRealtimeModel: String?
     @Published private(set) var phoneVoiceRealtimeNote: String?
+    @Published private(set) var backendCapabilityCheckMessage: String?
+    @Published private(set) var backendCapabilityCheckSucceeded: Bool?
+    @Published private(set) var isCheckingBackendCapabilities = false
 
     private var backendBaseURL = ""
     private var accountUsername = ""
@@ -403,6 +406,8 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             phoneVoiceRealtimeReady = nil
             phoneVoiceRealtimeModel = nil
             phoneVoiceRealtimeNote = nil
+            backendCapabilityCheckMessage = nil
+            backendCapabilityCheckSucceeded = nil
             deviceConnection = nil
             deviceError = nil
             deviceAskError = nil
@@ -2777,15 +2782,30 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         return result
     }
 
+    func checkBackendCapabilities() async {
+        guard !isCheckingBackendCapabilities else { return }
+        isCheckingBackendCapabilities = true
+        backendCapabilityCheckMessage = nil
+        backendCapabilityCheckSucceeded = nil
+        defer { isCheckingBackendCapabilities = false }
+        await loadVisionCapabilities()
+    }
+
     private func refreshVisionCapabilitiesIfNeeded(force: Bool = false) async {
         if !force, let lastVisionStatusCheck,
            Date().timeIntervalSince(lastVisionStatusCheck) < 15 {
             return
         }
+        await loadVisionCapabilities()
+    }
+
+    private func loadVisionCapabilities() async {
         lastVisionStatusCheck = Date()
         do {
             let request = try makeRequest(endpoint: "status")
-            let (data, response) = try await performAuthenticatedRequest(request)
+            // /api/status is intentionally public so the connection and model check
+            // works before a user signs in. Basic Auth is still applied for tunnels.
+            let (data, response) = try await URLSession.shared.data(for: request)
             let payload = try Self.decode(DeviceCapabilitiesPayload.self, data: data, response: response)
             deviceVisionReady = payload.visionReady
             deviceVisionProvider = payload.visionProvider
@@ -2797,6 +2817,25 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             phoneVoiceRealtimeReady = payload.voiceRealtimeReady
             phoneVoiceRealtimeModel = payload.voiceSttModel
             phoneVoiceRealtimeNote = payload.voiceRealtimeNote
+            if isCheckingBackendCapabilities {
+                let vision = payload.visionReady
+                    ? (payload.visionModel ?? payload.visionProvider ?? "sẵn sàng")
+                    : "chưa sẵn sàng"
+                let detector = payload.detectorReady == true
+                    ? (payload.detectorModel ?? "sẵn sàng")
+                    : "chưa sẵn sàng"
+                let transcription = payload.transcriptionReady == true
+                    ? (payload.transcriptionModel ?? "sẵn sàng")
+                    : "chưa sẵn sàng"
+                let realtime: String
+                if payload.voiceRealtimeReady == true {
+                    realtime = payload.voiceSttModel ?? "đang bật"
+                } else {
+                    realtime = "chưa bật; app dùng Speech iPhone/Whisper dự phòng"
+                }
+                backendCapabilityCheckSucceeded = true
+                backendCapabilityCheckMessage = "Backend phản hồi thành công.\nVision: \(vision)\nNhận diện: \(detector)\nNhận giọng nói: \(transcription)\nThoại realtime: \(realtime)"
+            }
         } catch {
             if !Task.isCancelled {
                 deviceVisionReady = nil
@@ -2809,6 +2848,13 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                 phoneVoiceRealtimeReady = nil
                 phoneVoiceRealtimeModel = nil
                 phoneVoiceRealtimeNote = nil
+                if isCheckingBackendCapabilities {
+                    backendCapabilityCheckSucceeded = false
+                    backendCapabilityCheckMessage = userFacingErrorMessage(
+                        error,
+                        fallback: "Không đọc được trạng thái backend. Kiểm tra địa chỉ và thử lại."
+                    )
+                }
             }
         }
     }
@@ -3329,7 +3375,7 @@ private func userFacingErrorMessage(_ error: Error, fallback: String) -> String 
     case .some(.timedOut):
         return "Máy chủ trả lời quá lâu. Kiểm tra kết nối rồi thử lại nhé."
     case .some(.notConnectedToInternet), .some(.networkConnectionLost), .some(.cannotFindHost), .some(.cannotConnectToHost), .some(.dnsLookupFailed):
-        return "Không kết nối được máy chủ app. Kiểm tra Wi-Fi/Flask rồi thử lại nhé."
+        return "Không kết nối được backend. Kiểm tra URL, mạng hoặc máy chủ rồi thử lại nhé."
     case .some:
         return fallback
     case .none:

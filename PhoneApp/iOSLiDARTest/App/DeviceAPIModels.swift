@@ -238,6 +238,7 @@ struct DeviceZone: Decodable, Identifiable {
 struct DeviceCapabilitiesPayload: Decodable {
     let visionReady: Bool
     let visionProvider: String?
+    let visionModel: String?
     let detectorReady: Bool?
     let detectorModel: String?
     let detectorProvider: String?
@@ -250,6 +251,7 @@ struct DeviceCapabilitiesPayload: Decodable {
     enum CodingKeys: String, CodingKey {
         case visionReady = "vision_ready"
         case visionProvider = "vision_provider"
+        case visionModel = "vision_model"
         case detectorReady = "detector_ready"
         case detectorModel = "detector_model"
         case detectorProvider = "detector_provider"

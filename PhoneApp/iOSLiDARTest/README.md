@@ -74,6 +74,13 @@ JPEG or backend Vision response. Button capture/ask events arriving over BLE
 are accepted for media work only when the backend status has the same
 `device_id` and `boot_id`.
 
+Backend settings include a **Kiểm tra backend** action. It reads the public
+`GET /api/status` endpoint before account sign-in and displays the declared
+Vision, detector, transcription, and realtime voice models. This is a
+connectivity/capability check only; it does not upload an image or prove that
+inference succeeds. Cloudflare reports model readiness from the Workers AI
+binding, so a real image request is still needed to verify inference.
+
 The app treats a backend device as ready
 only when the backend reports `source=device`, `device_connected=true`,
 `operation_enabled=true`, a live camera, a positive frame sequence, and a

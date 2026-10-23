@@ -39,11 +39,23 @@ struct CameraScreen: View {
         }
         .sheet(isPresented: $showSettings) {
             BackendSettingsSheet(
+                model: model,
                 backendURL: $backendURL,
                 accountUsername: $accountUsername,
                 accountPassword: $accountPassword,
                 accessUsername: $accessUsername,
                 accessPassword: $accessPassword,
+                onCheckBackend: {
+                    model.configure(
+                        baseURL: backendURL,
+                        accountUsername: accountUsername,
+                        accountPassword: accountPassword,
+                        accessUsername: accessUsername,
+                        accessPassword: accessPassword,
+                        forceReauthenticate: true
+                    )
+                    await model.checkBackendCapabilities()
+                },
                 onSave: {
                     do {
                         if accountPassword.isEmpty {
@@ -1410,11 +1422,13 @@ private struct BLEDevicePanel: View {
 
 private struct BackendSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject var model: CameraModel
     @Binding var backendURL: String
     @Binding var accountUsername: String
     @Binding var accountPassword: String
     @Binding var accessUsername: String
     @Binding var accessPassword: String
+    let onCheckBackend: () async -> Void
     let onSave: () -> Void
     let onRegister: (String, String, String, String) async throws -> Void
     @State private var registrationDisplayName = ""
@@ -1432,6 +1446,30 @@ private struct BackendSettingsSheet: View {
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                }
+                Section("Kiểm tra kết nối và model") {
+                    Button {
+                        Task { await onCheckBackend() }
+                    } label: {
+                        if modelIsCheckingBackend {
+                            ProgressView("Đang kiểm tra…")
+                        } else {
+                            Label("Kiểm tra backend", systemImage: "network")
+                        }
+                    }
+                    .disabled(modelIsCheckingBackend)
+                    .accessibilityIdentifier("backend.check")
+                    if let checkMessage = backendCheckMessage {
+                        Text(checkMessage)
+                            .font(.footnote)
+                            .foregroundStyle(backendCheckSucceeded == true ? .green : .red)
+                            .textSelection(.enabled)
+                            .accessibilityIdentifier("backend.check.result")
+                    } else {
+                        Text("Kiểm tra URL, kết nối và model backend khai báo. Không gửi ảnh hoặc chạy inference.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("Tài khoản Ro Sight") {
                     TextField("Tên đăng nhập app", text: $accountUsername)
@@ -1501,6 +1539,18 @@ private struct BackendSettingsSheet: View {
                 }
             }
         }
+    }
+
+    private var modelIsCheckingBackend: Bool {
+        model.isCheckingBackendCapabilities
+    }
+
+    private var backendCheckSucceeded: Bool? {
+        model.backendCapabilityCheckSucceeded
+    }
+
+    private var backendCheckMessage: String? {
+        model.backendCapabilityCheckMessage
     }
 
     private var canRegister: Bool {
