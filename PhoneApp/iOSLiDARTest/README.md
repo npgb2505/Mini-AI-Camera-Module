@@ -198,12 +198,14 @@ authenticated `/api/voice/realtime` WebSocket, streams iPhone microphone audio
 as mono 16 kHz linear PCM, sends a fresh camera JPEG about every two seconds,
 and receives Vietnamese transcript plus streamed Qwen answer events. iPhone
 `AVSpeechSynthesizer` speaks response chunks, then the app starts listening
-again. If the route is absent or fails, it falls back to iOS Speech Recognition;
-confident transcripts and a fresh frame go to `/api/voice/turn`, and short WAV
-audio can go to `/api/transcribe` when average segment confidence is below 0.45
-or unavailable and Whisper is ready. This is turn-taking, not full-duplex. Raw
-microphone streaming is disclosed by the permission prompt and voice-screen
-privacy text. The Worker does not store audio or camera frames in D1.
+again. If the route is absent or fails, iOS Speech Recognition shows interim
+text and detects the end of a phrase. When cloud transcription is ready, every
+turn's captured WAV goes to `/api/transcribe` and Whisper supplies the primary
+Vietnamese transcript; if it fails, the app uses the iPhone transcript. The
+transcript and a fresh frame then go to `/api/voice/turn`. This is turn-taking,
+not full-duplex. Raw microphone upload is disclosed by the permission prompt
+and voice-screen privacy text. The Worker does not store audio or camera frames
+in D1.
 
 The current preview is a temporary Cloudflare account at
 `https://ro-mobile-assistant-preview.slimy-kettle.workers.dev`. D1 is created
@@ -217,11 +219,14 @@ turn streamed the first Qwen delta in 1.7 seconds and completed in 2.4 seconds.
 These are single preview measurements, not iPhone microphone latency.
 
 Nova-3 microphone WebSocket remains disabled because this Worker has no AI
-Gateway credentials. The current native path recognizes Vietnamese speech on
-iPhone, sends the transcript and a fresh frame to cloud Qwen, streams answer
-text back, and reads it aloud. This is turn-taking near-realtime, not
-full-duplex. Cloudflare model inference remains off the iPhone; ARKit LiDAR and
-camera capture necessarily stay on the phone.
+Gateway credentials and Vietnamese streaming has not been verified on this
+account. The native app uses iPhone Speech Recognition to show interim text and
+detect the end of each phrase, then sends captured audio to Cloudflare Whisper
+Large v3 Turbo for the primary Vietnamese transcript. If cloud transcription
+fails, it keeps the iPhone transcript and still sends the question and a fresh
+frame to Qwen. Qwen streams answer text back and iPhone reads it aloud. This is
+turn-taking near-realtime, not full-duplex. Cloudflare model inference remains
+off the iPhone; ARKit LiDAR and camera capture stay on the phone.
 Safari's PWA also supports voice, but cannot read ARKit depth, so the native app
 is the path that pairs vision boxes with sceneDepth from the same camera frame.
 

@@ -9,16 +9,18 @@ cài.
 `https://ro-mobile-assistant-preview.slimy-kettle.workers.dev`; D1 đã tạo và
 migration `0001_init.sql` đã áp dụng. `/api/status` hiện báo Qwen 3.8 27B,
 Moondream 3.1 và Whisper Large v3 Turbo sẵn sàng (Worker build
-`20261023-cloudflare-voice-vi-v7`). Thoại Nova-3 realtime hiện tắt; app dùng
-Speech trên iPhone rồi stream câu trả lời Qwen. Tài khoản Cloudflare tạm chưa
+`20261023-cloudflare-voice-vi-v7`). Thoại Nova-3 realtime hiện tắt; app gửi
+mỗi lượt audio lên Whisper cloud, còn Speech trên iPhone hiện chữ tạm và dự
+phòng khi Whisper lỗi; Qwen stream câu trả lời. Tài khoản Cloudflare tạm chưa
 được claim; trang claim đã được gửi tới panel Codex và cần hoàn tất trong 60
 phút để giữ Worker cùng dữ liệu.
 
 App mặc định dùng URL mới và tự chuyển hai URL preview cũ đã lưu. WebSocket
-Nova-3 chưa bật vì Worker chưa có AI Gateway credentials. Thoại hiện dùng
-Speech tiếng Việt trên iPhone, gửi câu hỏi và ảnh mới tới Qwen, stream câu trả
-lời về iPhone rồi đọc thành tiếng. Đây là hội thoại từng lượt gần thời gian
-thực; không phải full-duplex. Lần đo trên preview trước đó cho thấy ảnh
+Nova-3 chưa bật vì Worker chưa có AI Gateway credentials. Speech tiếng Việt
+trên iPhone hiện chữ tạm thời; Whisper cloud xác nhận mỗi câu rồi gửi
+transcript và ảnh mới tới Qwen. Câu trả lời được stream về iPhone rồi đọc
+thành tiếng. Đây là hội thoại từng lượt gần thời gian thực; không phải
+full-duplex. Lần đo trên preview trước đó cho thấy ảnh
 Simulator được Qwen trả lời trong 6,6 giây, token đầu tiên của lượt thoại văn
 bản sau 1,7 giây và hoàn tất sau 2,4 giây; chưa đo mic trên iPhone thật.
 
@@ -187,10 +189,12 @@ xác nhận có tiếng hay cảnh báo thật, và không bật MODE.
   Microphone. Nếu Worker báo `voice_realtime_ready=true`, app truyền PCM mono
   16 kHz cùng ảnh mới tùy chọn qua `/api/voice/realtime`; transcript và câu trả
   lời Qwen về theo luồng. Nếu không sẵn sàng hoặc kết nối lỗi, app xin quyền
-  Speech Recognition và chuyển sang nhận dạng iOS. Transcript đủ tin cậy cùng
-  ảnh mới đi thẳng tới Qwen; khi confidence thấp hơn 0,45 hoặc chưa có confidence,
-  app có thể gửi WAV ngắn tới Whisper trên Cloudflare. Audio không được ghi vào
-  D1. Đây là hội thoại theo lượt, chưa full-duplex. Luồng Nova-3 tiếng Việt bị
+  Speech Recognition để hiện chữ tạm thời và phát hiện lúc kết thúc câu. Khi
+  Whisper Cloudflare sẵn sàng, app gửi audio của mỗi lượt lên Whisper Large v3
+  Turbo để lấy transcript chính; nếu Whisper lỗi, app dùng transcript iPhone.
+  Transcript, ảnh mới và LiDAR hiện hành được gửi tới Qwen; câu trả lời được
+  stream về và iPhone đọc. Audio không được ghi vào D1. Đây là hội thoại theo
+  lượt, chưa full-duplex. Luồng Nova-3 tiếng Việt bị
   khóa trong Worker cho tới khi được xác minh trên endpoint Cloudflare thật.
 - PWA có thêm tùy chọn ghi âm trong app khi backend đã cấu hình API phiên âm;
   nếu không, dùng Speech Recognition của Safari/iOS để nhận tiếng Việt và gửi

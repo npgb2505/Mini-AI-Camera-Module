@@ -159,7 +159,6 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     private var voiceSessionGeneration = 0
     private var voiceRecognitionGeneration = 0
     private var latestVoiceTranscript = ""
-    private var latestVoiceTranscriptConfidence: Double?
     private var voiceHistory: [[String: String]] = []
     private var voiceSpeechBuffer = ""
     private var voiceSpeechUtteranceIDs: Set<ObjectIdentifier> = []
@@ -217,8 +216,6 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     static let phoneProximityAlertThresholdMeters = 0.8
     static let phoneProximityResetThresholdMeters = 1.05
     static let phoneNavigationHorizonMeters = 2.5
-    // Avoid a second network round trip for confident iOS transcripts; tune with real Vietnamese speech.
-    private static let voiceCloudTranscriptionConfidenceThreshold = 0.45
 
     var phonePathSummary: PhonePathSummary? {
         guard phoneDetectionsFresh else { return nil }
@@ -605,7 +602,10 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         }
         let note = phoneVoiceRealtimeNote?.trimmingCharacters(in: .whitespacesAndNewlines)
         let availability = note.map { $0.isEmpty ? "" : " " + $0 } ?? ""
-        return "Hiện cloud chưa xác nhận nhận dạng tiếng Việt realtime. Speech của iPhone nhận câu nói; transcript và ảnh mới gửi tới Qwen. Khi nhận dạng chưa chắc, app có thể gửi đoạn audio ngắn tới Whisper trên Cloudflare.\(availability)"
+        if phoneTranscriptionReady == true {
+            return "Speech của iPhone hiện chữ tạm và phát hiện lúc kết thúc câu. Mỗi lượt Microphone được gửi tới Whisper trên Cloudflare để lấy transcript chính; nếu Whisper lỗi, app dùng transcript iPhone. Transcript và ảnh mới gửi tới Qwen; audio không được lưu trong cơ sở dữ liệu app.\(availability)"
+        }
+        return "Speech của iPhone nhận dạng tiếng Việt; transcript và ảnh mới gửi tới Qwen. Nhận dạng tiếng Việt trên cloud hiện chưa sẵn sàng.\(availability)"
     }
 
     private func speakOnPhone(_ text: String, isAnswer: Bool, isProximityAlert: Bool) {
@@ -1853,7 +1853,6 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         isVoiceThinking = false
         voiceTranscript = ""
         latestVoiceTranscript = ""
-        latestVoiceTranscriptConfidence = nil
         voiceHistory = []
 
         if useRealtimeCloud {
@@ -2297,7 +2296,6 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         }
         voiceAudioCapture.reset(sampleRate: format.sampleRate)
         lastVoiceCaptureWAV = nil
-        latestVoiceTranscriptConfidence = nil
         let audioCapture = voiceAudioCapture
         input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
             request.append(buffer)
@@ -2309,15 +2307,10 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         let recognitionGeneration = voiceRecognitionGeneration
         voiceRecognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             let text = result?.bestTranscription.formattedString ?? ""
-            let segments = result?.bestTranscription.segments ?? []
-            let confidence = segments.isEmpty
-                ? nil
-                : Double(segments.reduce(Float.zero) { $0 + $1.confidence } / Float(segments.count))
             let isFinal = result?.isFinal ?? false
             let errorMessage = error?.localizedDescription
             Task { @MainActor [weak self] in
                 self?.handleVoiceRecognition(text: text,
-                                              confidence: confidence,
                                               isFinal: isFinal,
                                               errorMessage: errorMessage,
                                               generation: recognitionGeneration)
@@ -2328,12 +2321,13 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         try voiceAudioEngine.start()
         isVoiceListening = true
         isVoiceThinking = false
-        voiceStatus = "Đang nghe… nói tự nhiên bằng tiếng Việt."
+        voiceStatus = phoneTranscriptionReady == true
+            ? "Đang nghe tiếng Việt; Whisper cloud sẽ xác nhận từng câu."
+            : "Đang nghe… nói tự nhiên bằng tiếng Việt."
     }
 
     private func handleVoiceRecognition(
         text: String,
-        confidence: Double?,
         isFinal: Bool,
         errorMessage: String?,
         generation: Int
@@ -2345,7 +2339,6 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !cleaned.isEmpty {
             latestVoiceTranscript = cleaned
-            latestVoiceTranscriptConfidence = confidence
             voiceTranscript = cleaned
             voiceStatus = "Đang nghe tiếng Việt…"
             voiceDebounceTask?.cancel()
@@ -2418,7 +2411,6 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         voiceDebounceTask?.cancel()
         voiceDebounceTask = nil
         let shouldUseCloudTranscription = phoneTranscriptionReady == true
-            && (latestVoiceTranscriptConfidence.map { $0 < Self.voiceCloudTranscriptionConfidenceThreshold } ?? true)
         stopVoiceCapture(preserveAudioForTurn: shouldUseCloudTranscription)
         let capturedAudio = shouldUseCloudTranscription ? lastVoiceCaptureWAV : nil
         lastVoiceCaptureWAV = nil
