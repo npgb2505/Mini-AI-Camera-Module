@@ -9,7 +9,7 @@ private enum RoSightMode: Equatable {
 struct CameraScreen: View {
     @StateObject private var model = CameraModel()
     @StateObject private var bluetoothTransport = BLEDeviceTransport()
-    @AppStorage("roSight.backendURL") private var backendURL = "https://ro-mobile-assistant-preview.diamond-fold.workers.dev"
+    @AppStorage("roSight.backendURL") private var backendURL = "https://ro-mobile-assistant-preview.slimy-kettle.workers.dev"
     @AppStorage("roSight.accountUsername") private var accountUsername = ""
     @AppStorage("roSight.phoneProximityAlertsEnabled") private var phoneProximityAlertsEnabled = true
     @State private var accountPassword = ""
@@ -78,8 +78,13 @@ struct CameraScreen: View {
             Text(credentialError)
         }
         .onAppear {
-            if URL(string: backendURL)?.host == "ro-mobile-assistant.airy-clave.workers.dev" {
-                backendURL = "https://ro-mobile-assistant-preview.diamond-fold.workers.dev"
+            let retiredCloudflareHosts: Set<String> = [
+                "ro-mobile-assistant.airy-clave.workers.dev",
+                "ro-mobile-assistant-preview.diamond-fold.workers.dev"
+            ]
+            if let host = URL(string: backendURL)?.host?.lowercased(),
+               retiredCloudflareHosts.contains(host) {
+                backendURL = "https://ro-mobile-assistant-preview.slimy-kettle.workers.dev"
             }
             if accountPassword.isEmpty {
                 accountPassword = AccountCredentialStore.loadPassword() ?? ""

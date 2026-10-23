@@ -5,17 +5,20 @@ miễn phí. Không cần sở hữu Mac. **PWA là đường thử ngay**; nati
 được build trên runner macOS của GitHub Actions rồi ký trên Windows trước khi
 cài.
 
-**Tình trạng ngày 23/10/2026:** Đã dựng lại preview tạm tại
-`https://ro-mobile-assistant-preview.diamond-fold.workers.dev`. Worker và D1
-đang hoạt động; claim tài khoản trong 60 phút để giữ lại dịch vụ và dữ liệu.
-`/api/status` báo Qwen 3.8 27B, Moondream 3.1, Whisper Large v3 Turbo sẵn sàng.
-Thử inference thật với ảnh Simulator: Qwen Vision trả lời trong 6,6 giây.
-Thử lượt thoại text qua SSE: token Qwen đầu tiên sau 1,7 giây, hoàn tất sau
-2,4 giây. Đây chưa phải phép đo mic trên iPhone thật.
+**Tình trạng ngày 23/10/2026:** Worker tạm đang chạy tại
+`https://ro-mobile-assistant-preview.slimy-kettle.workers.dev`; D1 đã tạo và
+migration `0001_init.sql` đã áp dụng. `/api/status` hiện báo Qwen 3.8 27B,
+Moondream 3.1 và Whisper Large v3 Turbo sẵn sàng. Tài khoản Cloudflare tạm
+chưa được claim; trang claim đã mở trong Codex và phải hoàn tất trong 60 phút
+để giữ Worker cùng dữ liệu.
 
-App mặc định đã chuyển sang URL preview mới và tự cập nhật URL cũ đã lưu.
-Native voice dùng Speech của iPhone rồi stream câu trả lời Qwen; WebSocket
-Nova-3 gửi mic PCM vẫn tắt tới khi xác nhận streaming tiếng Việt trên Gateway.
+App mặc định dùng URL mới và tự chuyển hai URL preview cũ đã lưu. WebSocket
+Nova-3 chưa bật vì Worker chưa có AI Gateway credentials. Thoại hiện dùng
+Speech tiếng Việt trên iPhone, gửi câu hỏi và ảnh mới tới Qwen, stream câu trả
+lời về iPhone rồi đọc thành tiếng. Đây là hội thoại từng lượt gần thời gian
+thực; không phải full-duplex. Lần đo trên preview trước đó cho thấy ảnh
+Simulator được Qwen trả lời trong 6,6 giây, token đầu tiên của lượt thoại văn
+bản sau 1,7 giây và hoàn tất sau 2,4 giây; chưa đo mic trên iPhone thật.
 
 Native app có hành lang hình thang phủ lên camera, chỉ tính vật giao với vùng
 giữa và nằm trong tầm thử 2,5 m; vật xa hơn chỉ là ngữ cảnh. Địa chỉ cloud được
@@ -100,17 +103,22 @@ Workflow build **unsigned**. Build PASS tạo gói cài, nhưng chưa chứng mi
 
 ### Cài AltServer trên Windows
 
-**Chẩn đoán PC ngày 23/10/2026:** Windows có Apple Devices, iTunes và iCloud
-bản Microsoft Store, nhưng hiện không có dịch vụ Apple Mobile Device và không
-liệt kê iPhone như thiết bị USB. AltServer vì thế chưa có đường USB để nhận
-điện thoại. AltStore Classic hướng dẫn cài iTunes và iCloud desktop trực tiếp
-từ Apple, sau đó mở khóa iPhone, chọn **Trust This Computer** và chạy AltServer
-bằng quyền Administrator. Xem [hướng dẫn Windows của AltStore](https://faq.altstore.io/altstore-classic/how-to-install-altstore-windows)
+**Chẩn đoán PC ngày 23/10/2026:** Đã gỡ iTunes Microsoft Store vì bộ cài Apple
+desktop báo xung đột; iTunes 12.13.11.1 ký bởi Apple đã cài thành công.
+Apple Mobile Device Support 20.0.0.35 cũng đã cài; dịch vụ Apple Mobile Device
+đang chạy tự động. Windows vẫn chưa liệt kê iPhone USB sau khi quét lại, và
+iTunes chưa hiện thiết bị. AltServer chưa được xác minh nhận iPhone hoặc cài
+IPA. iCloud vẫn là bản Microsoft Store. AltStore Classic khuyên dùng bản iTunes
+và iCloud desktop; Apple hiện hướng dẫn bản iCloud Windows mới qua Microsoft
+Store. Nếu AltServer vẫn lỗi sau khi Windows nhận điện thoại, xem mục thay thế
+cho iCloud Store trong [hướng dẫn khắc phục AltStore](https://faq.altstore.io/altstore-classic/troubleshooting-guide).
+Xem thêm [hướng dẫn Windows của AltStore](https://faq.altstore.io/altstore-classic/how-to-install-altstore-windows)
 và [khắc phục iPhone không được nhận diện của Apple](https://support.apple.com/en-ie/102347).
 
-1. Làm theo [hướng dẫn AltStore Classic cho Windows](https://faq.altstore.io/altstore-classic/how-to-install-altstore-windows).
-   Cài iTunes và iCloud bằng bộ cài tải từ Apple, không dùng gói Microsoft
-   Store; cài AltServer for Windows và chạy AltServer bằng quyền Administrator.
+1. iTunes desktop cùng Apple Mobile Device Service đã có trên PC này. Cài
+   AltServer for Windows rồi chạy bằng quyền Administrator. Với iCloud Store,
+   chỉ dùng hướng dẫn thay thế của AltStore nếu bước nhận thiết bị hoặc đăng
+   nhập AltServer vẫn lỗi.
 2. Cắm iPhone vào máy tính, mở khóa máy và chọn **Trust This Computer** nếu
    iPhone hỏi. Có thể bật Wi-Fi Sync trong iTunes để AltServer nhận điện thoại
    qua cùng mạng Wi-Fi ở những lần sau.

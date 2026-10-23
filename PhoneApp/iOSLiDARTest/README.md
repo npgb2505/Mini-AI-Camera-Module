@@ -199,16 +199,22 @@ microphone streaming is disclosed by the permission prompt and voice-screen
 privacy text. The Worker does not store audio or camera frames in D1.
 
 The current preview is a temporary Cloudflare account at
-`https://ro-mobile-assistant-preview.diamond-fold.workers.dev`; claim it within
-60 minutes to retain the Worker and D1. Its status endpoint currently reports
-Qwen 3.8 27B, Moondream 3.1, and Whisper Large v3 Turbo as ready. A live test on
-a Simulator screenshot returned a Qwen vision answer in 6.6 seconds. A text
-voice turn streamed its first Qwen delta in 1.7 seconds and completed in 2.4
-seconds. These are single preview measurements, not iPhone microphone latency.
-The native app's default URL has been switched to this preview and migrates the
-old dead URL on launch. Nova-3 microphone streaming remains disabled until
-Vietnamese streaming is confirmed for the configured Cloudflare Gateway; native
-voice currently uses iOS Speech followed by streamed Qwen.
+`https://ro-mobile-assistant-preview.slimy-kettle.workers.dev`. D1 is created
+and migration `0001_init.sql` is applied. `/api/status` reports Qwen 3.8 27B,
+Moondream 3.1, and Whisper Large v3 Turbo as ready. The Cloudflare claim page
+is open in Codex; the account must be claimed within 60 minutes to retain the
+Worker and D1. The app defaults to this endpoint and migrates both retired
+preview URLs on launch. A previous preview run on the same Worker build
+answered a Simulator screenshot with Qwen Vision in 6.6 seconds; its text voice
+turn streamed the first Qwen delta in 1.7 seconds and completed in 2.4 seconds.
+These are single preview measurements, not iPhone microphone latency.
+
+Nova-3 microphone WebSocket remains disabled because this Worker has no AI
+Gateway credentials. The current native path recognizes Vietnamese speech on
+iPhone, sends the transcript and a fresh frame to cloud Qwen, streams answer
+text back, and reads it aloud. This is turn-taking near-realtime, not
+full-duplex. Cloudflare model inference remains off the iPhone; ARKit LiDAR and
+camera capture necessarily stay on the phone.
 Safari's PWA also supports voice, but cannot read ARKit depth, so the native app
 is the path that pairs vision boxes with sceneDepth from the same camera frame.
 
@@ -346,9 +352,13 @@ use the account's included quota. See the no-Mac [installation guide](INSTALL_VI
 
 The current development host is Windows and has neither `xcodebuild` nor the
 Swift toolchain. The macOS workflow has compiled the current native source,
-including CoreBluetooth, LiDAR, and speech playback. It has not been installed
-or exercised on a physical iPhone; the build result alone does not verify
-camera permission, ARKit depth, BLE, audio, or ESP32 behavior.
+including CoreBluetooth, LiDAR, and speech playback. Apple desktop iTunes
+12.13.11.1 and Apple Mobile Device Support 20.0.0.35 are now installed on the
+Windows host, and Apple Mobile Device Service is running automatically. Windows
+still does not enumerate an iPhone USB device and iTunes shows no device, so
+the IPA has not been signed or installed on a physical iPhone. Camera
+permission, ARKit depth, BLE, audio, and ESP32 behavior remain unverified on
+hardware.
 
 An unsigned IPA must be signed for installation. AltServer/AltStore can
 sideload it with a free Apple Account; follow the current AltStore instructions
