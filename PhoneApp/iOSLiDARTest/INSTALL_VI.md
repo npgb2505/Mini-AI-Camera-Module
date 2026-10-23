@@ -8,9 +8,11 @@ cài.
 **Tình trạng ngày 23/10/2026:** Worker tạm đang chạy tại
 `https://ro-mobile-assistant-preview.slimy-kettle.workers.dev`; D1 đã tạo và
 migration `0001_init.sql` đã áp dụng. `/api/status` hiện báo Qwen 3.8 27B,
-Moondream 3.1 và Whisper Large v3 Turbo sẵn sàng. Tài khoản Cloudflare tạm
-chưa được claim; trang claim đã mở trong Codex và phải hoàn tất trong 60 phút
-để giữ Worker cùng dữ liệu.
+Moondream 3.1 và Whisper Large v3 Turbo sẵn sàng (Worker build
+`20261023-cloudflare-voice-vi-v7`). Thoại Nova-3 realtime hiện tắt; app dùng
+Speech trên iPhone rồi stream câu trả lời Qwen. Tài khoản Cloudflare tạm chưa
+được claim; trang claim đã được gửi tới panel Codex và cần hoàn tất trong 60
+phút để giữ Worker cùng dữ liệu.
 
 App mặc định dùng URL mới và tự chuyển hai URL preview cũ đã lưu. WebSocket
 Nova-3 chưa bật vì Worker chưa có AI Gateway credentials. Thoại hiện dùng
@@ -27,13 +29,13 @@ Các ngưỡng khoảng cách vẫn cần đo lại trên iPhone 12 Pro Max th�
 
 Native app và workflow đã được đẩy lên fork công khai
 `npgb2505/Mini-AI-Camera-Module`; repo gốc vẫn chỉ có quyền đọc. GitHub Actions
-run [39878989893](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39878989893)
-đã thành công sau 7m19s: 11 kiểm tra depth, 1 UI test vào/ra chế độ iPhone,
+run [39881683311](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39881683311)
+đã thành công sau 6m49s: 11 kiểm tra depth, 2 UI test: điều hướng chế độ iPhone và hiển thị form tạo tài khoản,
 mở app trên iPhone Simulator và build/upload IPA unsigned. IPA mới nhất nằm ở
-`../../../04_App/ios_builds/2026-10-23-run-39878989893/RoSight-unsigned.ipa`
-(655.627 byte, SHA-256 `510EAA5727F26022B35072B22C311C6A1C3A8923BA363109701CEFD2345A9AE6`).
+`../../../04_App/ios_builds/2026-10-23-run-39881683311/RoSight-unsigned.ipa`
+(675.594 byte, SHA-256 `B7D21FAE36DB7A26D71F0B4726DBB0D3C919B14A2A9732B19F9C1BFCDBDA1DB0`).
 Ảnh khởi chạy Simulator nằm ở
-`../../../04_App/ios_builds/2026-10-23-run-39878989893-simulator/launch.png`.
+`../../../04_App/ios_builds/2026-10-23-run-39881683311-simulator/launch.png`.
 Simulator không có LiDAR iPhone; IPA chưa được ký, cài hoặc đo thử trên iPhone
 12 Pro Max thật.
 
@@ -95,7 +97,7 @@ PWA không cần IPA, chứng chỉ ký hay Apple Developer Program. Quick Tunne
 ### Chuẩn bị một workflow IPA
 
 1. Nhánh app đã được đưa lên fork công khai [`npgb2505/Mini-AI-Camera-Module`](https://github.com/npgb2505/Mini-AI-Camera-Module), branch `codex/ios-lidar-test-2026-10-11`. Chỉ mã native app, tài liệu app và workflow được gửi lên; không có file KiCad.
-2. Bản mới nhất đã qua 11 kiểm tra depth, 1 UI test vào/ra chế độ iPhone, mở app trên Simulator và build thành công là [GitHub Actions run 39878989893](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39878989893). IPA đã tải về máy tại `../../../04_App/ios_builds/2026-10-23-run-39878989893/RoSight-unsigned.ipa`. Ảnh màn hình khởi chạy Simulator nằm tại `../../../04_App/ios_builds/2026-10-23-run-39878989893-simulator/launch.png`. Artifact trên GitHub được giữ ba ngày; mỗi lần push mã app, bài kiểm tra hoặc cấu hình build sẽ tự chạy lại; chỉ sửa tài liệu thì không chạy lại build.
+2. Bản mới nhất đã qua 11 kiểm tra depth, 2 UI test: điều hướng chế độ iPhone và hiển thị form tạo tài khoản, mở app trên Simulator và build thành công là [GitHub Actions run 39881683311](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39881683311). IPA đã tải về máy tại `../../../04_App/ios_builds/2026-10-23-run-39881683311/RoSight-unsigned.ipa`. Ảnh màn hình khởi chạy Simulator nằm tại `../../../04_App/ios_builds/2026-10-23-run-39881683311-simulator/launch.png`. Artifact trên GitHub được giữ ba ngày; mỗi lần push mã app, bài kiểm tra hoặc cấu hình build sẽ tự chạy lại; chỉ sửa tài liệu thì không chạy lại build.
 3. iOS native cần Xcode trên macOS; Windows hiện tại không có `xcodebuild`/Swift iOS SDK. GitHub Actions đã dùng runner `macos-15` để build nên không cần sở hữu Mac. Lượt CI đã chứng minh app mở được ở Simulator và tạo IPA unsigned; phần cài trên iPhone vẫn phải ký bằng AltServer. Runner chuẩn miễn phí cho repo công khai; repo riêng dùng quota plan. Xem [runner GitHub-hosted](https://docs.github.com/en/actions/reference/runners/github-hosted-runners), [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions) và [yêu cầu Xcode của Apple](https://developer.apple.com/xcode/system-requirements/) nếu cần thay đổi cách build.
 4. Với lần build mới, mở tab **Actions** trong fork, chọn **Build iOS test IPA**, tải artifact `RoSight-unsigned-ipa` rồi giải nén để lấy `RoSight-unsigned.ipa`.
 
