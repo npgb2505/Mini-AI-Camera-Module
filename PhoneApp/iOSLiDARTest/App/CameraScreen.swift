@@ -43,32 +43,61 @@ struct CameraScreen: View {
                 accountUsername: $accountUsername,
                 accountPassword: $accountPassword,
                 accessUsername: $accessUsername,
-                accessPassword: $accessPassword
-            ) {
-                do {
-                    if accountPassword.isEmpty {
-                        try AccountCredentialStore.deletePassword()
-                    } else {
-                        try AccountCredentialStore.savePassword(accountPassword)
+                accessPassword: $accessPassword,
+                onSave: {
+                    do {
+                        if accountPassword.isEmpty {
+                            try AccountCredentialStore.deletePassword()
+                        } else {
+                            try AccountCredentialStore.savePassword(accountPassword)
+                        }
+                    } catch {
+                        credentialError = error.localizedDescription
+                        showCredentialError = true
+                        return
                     }
-                } catch {
-                    credentialError = error.localizedDescription
-                    showCredentialError = true
-                    return
+                    deviceSpeechTask?.cancel()
+                    deviceSpeechTask = nil
+                    model.cancelDeviceSpeech()
+                    model.configure(
+                        baseURL: backendURL,
+                        accountUsername: accountUsername,
+                        accountPassword: accountPassword,
+                        accessUsername: accessUsername,
+                        accessPassword: accessPassword,
+                        forceReauthenticate: true
+                    )
+                    showSettings = false
+                },
+                onRegister: { displayName, username, password, registrationCode in
+                    model.configure(
+                        baseURL: backendURL,
+                        accountUsername: accountUsername,
+                        accountPassword: accountPassword,
+                        accessUsername: accessUsername,
+                        accessPassword: accessPassword,
+                        forceReauthenticate: true
+                    )
+                    try await model.registerCloudAccount(
+                        displayName: displayName,
+                        username: username,
+                        password: password,
+                        registrationCode: registrationCode
+                    )
+                    accountUsername = username
+                    accountPassword = password
+                    try AccountCredentialStore.savePassword(password)
+                    model.configure(
+                        baseURL: backendURL,
+                        accountUsername: accountUsername,
+                        accountPassword: accountPassword,
+                        accessUsername: accessUsername,
+                        accessPassword: accessPassword,
+                        forceReauthenticate: true
+                    )
+                    showSettings = false
                 }
-                deviceSpeechTask?.cancel()
-                deviceSpeechTask = nil
-                model.cancelDeviceSpeech()
-                model.configure(
-                    baseURL: backendURL,
-                    accountUsername: accountUsername,
-                    accountPassword: accountPassword,
-                    accessUsername: accessUsername,
-                    accessPassword: accessPassword,
-                    forceReauthenticate: true
-                )
-                showSettings = false
-            }
+            )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
@@ -1387,6 +1416,13 @@ private struct BackendSettingsSheet: View {
     @Binding var accessUsername: String
     @Binding var accessPassword: String
     let onSave: () -> Void
+    let onRegister: (String, String, String, String) async throws -> Void
+    @State private var registrationDisplayName = ""
+    @State private var registrationUsername = ""
+    @State private var registrationPassword = ""
+    @State private var registrationCode = ""
+    @State private var registrationError: String?
+    @State private var isRegistering = false
 
     var body: some View {
         NavigationStack {
@@ -1413,7 +1449,43 @@ private struct BackendSettingsSheet: View {
                     SecureField("Mật khẩu tunnel (chỉ giữ trong phiên này)", text: $accessPassword)
                 }
                 Section {
-                    Text("Với Cloudflare, tạo hồ sơ trước trong PWA Ro Sight bằng mã đăng ký, rồi dùng cùng tên đăng nhập và mật khẩu ở đây. Để trống Basic Auth. Chọn chế độ Chỉ dùng iPhone để dùng camera, LiDAR và model cloud; chế độ ESP32 vẫn cần backend Flask nội bộ.")
+                    Text("Để trống Basic Auth khi dùng Cloudflare. Chế độ Chỉ dùng iPhone dùng camera, LiDAR và model cloud; chế độ ESP32 cần backend Flask nội bộ.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Tạo tài khoản Cloudflare") {
+                    TextField("Tên hiển thị", text: $registrationDisplayName)
+                        .textContentType(.name)
+                        .accessibilityIdentifier("account.registration.display-name")
+                    TextField("Tên đăng nhập mới", text: $registrationUsername)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textContentType(.username)
+                        .accessibilityIdentifier("account.registration.username")
+                    SecureField("Mật khẩu mới", text: $registrationPassword)
+                        .textContentType(.newPassword)
+                        .accessibilityIdentifier("account.registration.password")
+                    SecureField("Mã đăng ký", text: $registrationCode)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("account.registration.code")
+                    Button {
+                        Task { await registerAccount() }
+                    } label: {
+                        if isRegistering {
+                            ProgressView("Đang tạo tài khoản…")
+                        } else {
+                            Text("Tạo tài khoản và kết nối")
+                        }
+                    }
+                    .disabled(isRegistering || !canRegister)
+                    .accessibilityIdentifier("account.registration.submit")
+                    if let registrationError {
+                        Text(registrationError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                    Text("Mã đăng ký do người quản lý Worker cung cấp. Mật khẩu được lưu trong iOS Keychain; mã đăng ký chỉ dùng trong lần tạo tài khoản này.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -1428,6 +1500,33 @@ private struct BackendSettingsSheet: View {
                     Button("Lưu") { onSave() }
                 }
             }
+        }
+    }
+
+    private var canRegister: Bool {
+        !registrationDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !registrationUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && registrationPassword.count >= 8
+            && !registrationCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @MainActor
+    private func registerAccount() async {
+        guard canRegister, !isRegistering else { return }
+        isRegistering = true
+        registrationError = nil
+        defer { isRegistering = false }
+        do {
+            try await onRegister(
+                registrationDisplayName.trimmingCharacters(in: .whitespacesAndNewlines),
+                registrationUsername.trimmingCharacters(in: .whitespacesAndNewlines),
+                registrationPassword,
+                registrationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            registrationCode = ""
+            registrationPassword = ""
+        } catch {
+            registrationError = error.localizedDescription
         }
     }
 }

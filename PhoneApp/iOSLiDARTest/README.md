@@ -174,15 +174,22 @@ one second without a newer depth update.
 
 The native **Chỉ dùng iPhone** mode can use the Cloudflare Worker preview for
 cloud detection and image questions while ARKit supplies depth locally. The
-current preview URL is prefilled in native settings. First create a Ro Sight
-account in the HTTPS PWA using the registration code supplied with the preview,
-then use the same username/password in native settings; leave the optional
-tunnel Basic Auth fields blank. The username is kept in app preferences and the
-password is stored in this iPhone's Keychain. Select **Chỉ dùng iPhone**. The
-app logs into `/api/auth/login`, reads `/api/status`,
+current preview URL is prefilled in native settings. Create a Ro Sight account
+directly in **Cài đặt backend → Tạo tài khoản Cloudflare** with the preview
+registration code; the code is used once and is not saved. The username is kept
+in app preferences and the password is stored in this iPhone's Keychain. Leave
+the optional tunnel Basic Auth fields blank. Select **Chỉ dùng iPhone**. The app
+logs into `/api/auth/login`, reads `/api/status`,
 sends detector frames to `/api/detect` (Moondream 3.1), and sends a fresh image
 plus question to `/api/analyze` (Moondream detection plus Qwen 3.8 27B vision).
 The live request cadence is capped at one frame per second to limit cloud use.
+
+When a recent detector result is available, native questions and voice turns
+send the exact JPEG used for that detector result, its box-level LiDAR estimates,
+and optional three-zone probabilities to Qwen. If detection is off, only the
+fresh center LiDAR sample may be attached; the server explicitly tells Qwen not
+to assign that center sample to a particular object. All distances remain
+estimates and never mean that a path is safe.
 
 The cloud Worker does not expose `/api/device/*`; ESP32 mode still requires the
 local Flask backend and its USB/Wi-Fi bridge. Native **Chỉ dùng iPhone** voice

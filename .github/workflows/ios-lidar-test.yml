@@ -5,6 +5,7 @@ on:
     paths:
       - 'PhoneApp/iOSLiDARTest/App/**'
       - 'PhoneApp/iOSLiDARTest/Tests/**'
+      - 'PhoneApp/iOSLiDARTest/UITests/**'
       - 'PhoneApp/iOSLiDARTest/project.yml'
       - '.github/workflows/ios-lidar-test.yml'
   workflow_dispatch:

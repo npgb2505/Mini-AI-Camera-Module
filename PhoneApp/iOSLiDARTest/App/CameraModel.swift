@@ -43,6 +43,16 @@ enum DetectionPathAssessment {
         case .unknownDistance: return .yellow
         }
     }
+
+    var wireValue: String {
+        switch self {
+        case .immediateCandidate: return "very_near"
+        case .nearCandidate: return "near"
+        case .farContext: return "far"
+        case .outsideCorridor: return "outside_corridor"
+        case .unknownDistance: return "unknown_distance"
+        }
+    }
 }
 
 struct FusedHazardZone: Identifiable {
@@ -121,6 +131,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     private var authenticationGeneration = 0
     private var latestJPEG: Data?
     private var latestJPEGAt: Date?
+    private var phoneDetectionFrameJPEG: Data?
     private var phoneDepthUpdatedAt: Date?
     private var phoneProximityAlertsEnabled = true
     private var phoneNearReadingLatched = false
@@ -294,6 +305,67 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         } ?? false
         if phoneDetectionsFresh != detectionFresh { phoneDetectionsFresh = detectionFresh }
         if !detectionFresh, !phoneHazardZones.isEmpty { phoneHazardZones = [] }
+        if !detectionFresh { phoneDetectionFrameJPEG = nil }
+    }
+
+    private func currentPhoneVisionSnapshot() -> (image: Data?, spatialContext: [String: Any]) {
+        let now = Date()
+        var spatialContext: [String: Any] = [:]
+        let centerDepthAgeMs = phoneDepthUpdatedAt.map { now.timeIntervalSince($0) * 1_000 }
+        if let centerDepthAgeMs,
+           centerDepthAgeMs >= 0,
+           centerDepthAgeMs <= Self.phoneDepthFreshnessSeconds * 1_000,
+           let centerDistance,
+           centerDistance.isFinite {
+            spatialContext["center_distance_m"] = centerDistance
+            spatialContext["center_depth_age_ms"] = Int(centerDepthAgeMs)
+        }
+
+        let detectionAgeMs = phoneDetectionsCapturedAt.map { now.timeIntervalSince($0) * 1_000 }
+        let hasFreshDetectionSnapshot = phoneDetectionsFresh
+            && detectionAgeMs.map { $0 >= 0 && $0 <= Self.phoneDetectionFreshnessSeconds * 1_000 } == true
+            && phoneDetectionFrameJPEG != nil
+        let image: Data?
+        if hasFreshDetectionSnapshot, let phoneDetectionFrameJPEG, let detectionAgeMs {
+            image = phoneDetectionFrameJPEG
+            spatialContext["detection_frame_age_ms"] = Int(detectionAgeMs)
+            spatialContext["detections"] = detections.prefix(8).map { detection in
+                var item: [String: Any] = [
+                    "label": detection.label,
+                    "confidence": detection.confidence,
+                    "path": detection.pathAssessment.wireValue
+                ]
+                if let distance = detection.distanceMeters, distance.isFinite {
+                    item["distance_m"] = distance
+                }
+                return item
+            }
+            if !phoneHazardZones.isEmpty {
+                spatialContext["zones"] = phoneHazardZones.map { zone in
+                    var item: [String: Any] = [
+                        "zone": zone.zone,
+                        "hazard_probability": zone.hazardProbability,
+                        "is_hazard": zone.isHazard
+                    ]
+                    if let distance = zone.depthMeters, distance.isFinite {
+                        item["depth_m"] = distance
+                    }
+                    return item
+                }
+            }
+        } else if phoneHasFreshFrame {
+            image = latestJPEG
+        } else {
+            image = nil
+        }
+
+        let imageAgeMs = hasFreshDetectionSnapshot
+            ? detectionAgeMs
+            : latestJPEGAt.map { now.timeIntervalSince($0) * 1_000 }
+        if let imageAgeMs, imageAgeMs >= 0, imageAgeMs <= Self.phoneFrameFreshnessSeconds * 1_000 {
+            spatialContext["camera_frame_age_ms"] = Int(imageAgeMs)
+        }
+        return (image, spatialContext)
     }
 
     func configure(
@@ -461,6 +533,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         isAsking = false
         latestJPEG = nil
         latestJPEGAt = nil
+        phoneDetectionFrameJPEG = nil
         phoneDepthUpdatedAt = nil
         phoneFrameFresh = false
         phoneDetectionsCapturedAt = nil
@@ -488,6 +561,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         detectionEnabled = false
         latestJPEG = nil
         latestJPEGAt = nil
+        phoneDetectionFrameJPEG = nil
         phoneDepthUpdatedAt = nil
         phoneFrameFresh = false
         phoneDetectionsCapturedAt = nil
@@ -498,6 +572,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         phoneProximityAlertStatus = "Chưa có số đo LiDAR mới."
         detections = []
         phoneHazardZones = []
+        phoneDetectionFrameJPEG = nil
         answer = ""
     }
 
@@ -613,6 +688,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         detectionEnabled = enabled
         detections = []
         phoneHazardZones = []
+        phoneDetectionFrameJPEG = nil
         phoneDetectionsCapturedAt = nil
         phoneDetectionsFresh = false
         status = enabled ? "Đang chờ detector server xử lý frame iPhone mới…" : "Đã tạm dừng gửi frame iPhone tới detector server."
@@ -1531,6 +1607,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             detectionEnabled = false
             detections = []
             phoneHazardZones = []
+            phoneDetectionFrameJPEG = nil
             phoneDetectionsCapturedAt = nil
             phoneDetectionsFresh = false
             return
@@ -1557,6 +1634,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                 )
             }
             phoneHazardZones = fuseHazardZones(payload.hazardZones, depth: depth)
+            phoneDetectionFrameJPEG = jpeg
             phoneDetectionsCapturedAt = capturedAt
             let detectionAge = Date().timeIntervalSince(capturedAt)
             phoneDetectionsFresh = detectionAge >= 0 && detectionAge <= Self.phoneDetectionFreshnessSeconds
@@ -1584,6 +1662,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                !Task.isCancelled {
                 detections = []
                 phoneHazardZones = []
+                phoneDetectionFrameJPEG = nil
                 phoneDetectionsCapturedAt = nil
                 phoneDetectionsFresh = false
                 status = userFacingErrorMessage(error, fallback: "Chưa gửi được frame tới backend. Kiểm tra kết nối rồi thử lại.")
@@ -1663,7 +1742,8 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             status = "Nhập câu hỏi về cảnh trước."
             return
         }
-        guard let latestJPEG, phoneHasFreshFrame else {
+        let sceneSnapshot = currentPhoneVisionSnapshot()
+        guard let latestJPEG = sceneSnapshot.image, phoneHasFreshFrame else {
             status = "Đang chờ khung hình camera mới."
             return
         }
@@ -1685,6 +1765,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                 endpoint: "analyze",
                 image: latestJPEG,
                 question: cleanedQuestion,
+                spatialContext: sceneSnapshot.spatialContext,
                 timeoutInterval: 210
             )
             guard phoneModeActive,
@@ -2061,14 +2142,17 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     }
 
     private func sendFreshFrameToRealtimeVoice() {
-        guard let image = latestJPEG,
-              let capturedAt = latestJPEGAt,
-              Date().timeIntervalSince(capturedAt) <= Self.phoneFrameFreshnessSeconds,
+        let sceneSnapshot = currentPhoneVisionSnapshot()
+        guard let image = sceneSnapshot.image,
               image.count <= 360_000,
               let writer = voiceRealtimeSocketWriter else { return }
         let dataURL = "data:image/jpeg;base64," + image.base64EncodedString()
+        var payload: [String: Any] = ["type": "frame", "data": dataURL]
+        if !sceneSnapshot.spatialContext.isEmpty {
+            payload["spatial_context"] = sceneSnapshot.spatialContext
+        }
         guard dataURL.utf8.count < 500_000,
-              let message = try? Self.jsonString(["type": "frame", "data": dataURL]) else { return }
+              let message = try? Self.jsonString(payload) else { return }
         writer.send(.string(message))
     }
 
@@ -2348,13 +2432,16 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         let voiceGeneration = voiceSessionGeneration
         let modeGeneration = phoneModeGeneration
         let history = voiceHistory
-        let image = phoneHasFreshFrame ? latestJPEG : nil
+        let sceneSnapshot = currentPhoneVisionSnapshot()
+        let image = sceneSnapshot.image
+        let spatialContext = sceneSnapshot.spatialContext
 
         voiceResponseTask?.cancel()
         voiceResponseTask = Task { [weak self] in
             await self?.streamVoiceAnswer(cleanedTranscript,
                                           history: history,
                                           image: image,
+                                          spatialContext: spatialContext,
                                           audioWAV: capturedAudio,
                                           voiceGeneration: voiceGeneration,
                                           modeGeneration: modeGeneration)
@@ -2365,6 +2452,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         _ transcript: String,
         history: [[String: String]],
         image: Data?,
+        spatialContext: [String: Any],
         audioWAV: Data?,
         voiceGeneration: Int,
         modeGeneration: Int
@@ -2395,7 +2483,12 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                 }
             }
 
-            let request = try makeVoiceTurnRequest(effectiveTranscript, history: history, image: image)
+            let request = try makeVoiceTurnRequest(
+                effectiveTranscript,
+                history: history,
+                image: image,
+                spatialContext: spatialContext
+            )
             let (bytes, response) = try await performAuthenticatedStreamRequest(request)
             guard let http = response as? HTTPURLResponse else {
                 throw APIError.message("Cloudflare không trả trạng thái HTTP hợp lệ.")
@@ -2480,7 +2573,8 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     private func makeVoiceTurnRequest(
         _ transcript: String,
         history: [[String: String]],
-        image: Data?
+        image: Data?,
+        spatialContext: [String: Any]
     ) throws -> URLRequest {
         let boundary = "RoSight-Voice-\(UUID().uuidString)"
         var request = try makeRequest(endpoint: "voice/turn", method: "POST", timeoutInterval: 150)
@@ -2491,6 +2585,11 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         let historyData = try JSONSerialization.data(withJSONObject: history)
         let historyText = String(data: historyData, encoding: .utf8) ?? "[]"
         body.appendUTF8("--\(boundary)\r\nContent-Disposition: form-data; name=\"history\"\r\n\r\n\(historyText)\r\n")
+        if !spatialContext.isEmpty {
+            let contextData = try JSONSerialization.data(withJSONObject: spatialContext)
+            let contextText = String(data: contextData, encoding: .utf8) ?? "{}"
+            body.appendUTF8("--\(boundary)\r\nContent-Disposition: form-data; name=\"spatial_context\"\r\n\r\n\(contextText)\r\n")
+        }
         if let image, image.count <= 240_000 {
             body.appendUTF8("--\(boundary)\r\nContent-Disposition: form-data; name=\"image\"; filename=\"iphone-frame.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n")
             body.append(image)
@@ -2580,6 +2679,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         endpoint: String,
         image: Data,
         question: String? = nil,
+        spatialContext: [String: Any] = [:],
         timeoutInterval: TimeInterval = 45
     ) async throws -> (Data, URLResponse) {
         let url = try makeEndpoint(endpoint)
@@ -2602,6 +2702,11 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             body.appendUTF8("Content-Disposition: form-data; name=\"question\"\r\n\r\n")
             body.appendUTF8(question)
             body.appendUTF8("\r\n")
+        }
+        if !spatialContext.isEmpty {
+            let contextData = try JSONSerialization.data(withJSONObject: spatialContext)
+            let contextText = String(data: contextData, encoding: .utf8) ?? "{}"
+            body.appendUTF8("--\(boundary)\r\nContent-Disposition: form-data; name=\"spatial_context\"\r\n\r\n\(contextText)\r\n")
         }
         body.appendUTF8("--\(boundary)--\r\n")
         request.httpBody = body
@@ -2863,6 +2968,33 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             throw APIError.authentication(message)
         }
         try Self.validateHTTPResponse(data: data, response: response)
+    }
+
+    func registerCloudAccount(
+        displayName: String,
+        username: String,
+        password: String,
+        registrationCode: String
+    ) async throws {
+        let url = try makeEndpoint("auth/register")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        applyAccessAuthorization(to: &request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "display_name": displayName,
+            "username": username,
+            "password": password,
+            "registration_code": registrationCode
+        ])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try Self.validateHTTPResponse(data: data, response: response)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw APIError.message("Worker không xác nhận đã tạo tài khoản.")
+        }
     }
 
     private func applyAccessAuthorization(to request: inout URLRequest) {

@@ -141,13 +141,22 @@ AltStore](https://faq.altstore.io/altstore-classic/your-altstore) và
 
 ### Kết nối app với backend
 
-Mở Ro Sight, vào phần thiết lập và nhập URL Flask backend cùng tài khoản Ro
-Sight. `127.0.0.1` trên iPhone trỏ về chính iPhone, nên hãy dùng địa chỉ máy
+Mở Ro Sight, vào phần thiết lập và kiểm tra URL backend đã điền sẵn. Với
+Cloudflare, nhập username, mật khẩu và mã đăng ký vào mục **Tạo tài khoản
+Cloudflare** ngay trong app; mã đăng ký nằm trong file local đã bỏ qua Git
+`04_App/ro-app/cloudflare/.preview-secrets.json`. Mã chỉ gửi khi tạo tài khoản,
+không được lưu trong app. Nếu đã tạo tài khoản, nhập username/mật khẩu hiện có.
+Username được lưu trong cài đặt app, mật khẩu trong iOS Keychain. Để trống
+Basic Auth. `127.0.0.1` trên iPhone trỏ về chính iPhone, nên với Flask hãy dùng địa chỉ máy
 tính có thể truy cập từ điện thoại hoặc URL HTTPS có xác thực. Nếu tunnel cần
 Basic Auth, nhập thông tin tunnel trong trường riêng. Đừng gửi thông tin đăng
 nhập qua HTTP trên mạng không tin cậy.
 
-Chế độ **Chỉ dùng iPhone** gửi ảnh và câu hỏi tới `/api/analyze`. Chế độ
+Chế độ **Chỉ dùng iPhone** gửi ảnh và câu hỏi tới `/api/analyze`; khi có kết quả
+detector gần đây, app gửi kèm đúng ảnh detector đã phân tích và ước lượng LiDAR
+trong từng box để Qwen trả lời có ngữ cảnh hơn. Số đo tại tâm ảnh được ghi rõ
+là số đo bề mặt vùng tâm, không gán cho vật thể. Các số đo đều là ước lượng,
+không xác nhận lối đi an toàn. Chế độ
 **Kết nối ESP32** gửi câu hỏi thủ công tới `/api/device/ask`; backend lấy frame
 mới từ thiết bị. Ở cả hai chế độ, kết quả có thể phát qua loa iPhone bằng nút
 **Đọc câu trả lời**.
