@@ -75,11 +75,11 @@ are accepted for media work only when the backend status has the same
 `device_id` and `boot_id`.
 
 Backend settings include a **Kiểm tra backend** action. It reads the public
-`GET /api/status` endpoint before account sign-in and displays the declared
-Vision, detector, transcription, and realtime voice models. This is a
-connectivity/capability check only; it does not upload an image or prove that
-inference succeeds. Cloudflare reports model readiness from the Workers AI
-binding, so a real image request is still needed to verify inference.
+`GET /api/status` endpoint before account sign-in and displays Vision, detector,
+transcription, and realtime voice status. This is a connectivity/capability
+check only; it does not upload an image or prove that inference succeeds. The
+active Worker has separately passed one public-image `/api/detect` smoke check;
+that does not verify the iPhone camera or safe navigation.
 
 The app treats a backend device as ready
 only when the backend reports `source=device`, `device_connected=true`,
@@ -201,43 +201,35 @@ estimates and never mean that a path is safe.
 
 The cloud Worker does not expose `/api/device/*`; ESP32 mode still requires the
 local Flask backend and its USB/Wi-Fi bridge. Native **Chỉ dùng iPhone** voice
-checks `voice_realtime_ready` in `/api/status`. If enabled, it opens the
-authenticated `/api/voice/realtime` WebSocket, streams iPhone microphone audio
-as mono 16 kHz linear PCM, sends a fresh camera JPEG about every two seconds,
-and receives Vietnamese transcript plus streamed Qwen answer events. iPhone
-`AVSpeechSynthesizer` speaks response chunks, then the app starts listening
-again. If the route is absent or fails, iOS Speech Recognition shows interim
-text and detects the end of a phrase. When cloud transcription is ready, every
-turn's captured WAV goes to `/api/transcribe` and Whisper supplies the primary
-Vietnamese transcript; if it fails, the app uses the iPhone transcript. The
-transcript and a fresh frame then go to `/api/voice/turn`. This is turn-taking,
-not full-duplex. Raw microphone upload is disclosed by the permission prompt
-and voice-screen privacy text. The Worker does not store audio or camera frames
-in D1.
+checks `voice_realtime_ready` in `/api/status`. The active Worker reports
+`false`, so iOS Speech Recognition (`vi-VN`) shows interim text and detects the
+end of a phrase. When cloud transcription is ready, the captured WAV goes to
+`/api/transcribe` and Whisper supplies the Vietnamese transcript; if it fails,
+the app uses the iPhone transcript. The transcript and a fresh frame then go to
+`/api/voice/turn`; Qwen streams the answer and `AVSpeechSynthesizer` speaks it.
+This is turn-taking, not full-duplex. A Worker WebSocket probe reached HTTP 101
+but the Nova-3 upstream failed before audio was sent, so the Vietnamese realtime
+route stays gated until a transcript is verified. Raw microphone upload is
+disclosed by the permission prompt and voice-screen privacy text. The Worker
+does not store audio or camera frames in D1.
 
 The active Worker endpoint is
 `https://ro-mobile-assistant.gfgfhtrffg.workers.dev`. It was deployed on October
 23, 2026 with the `ro-mobile-assistant` D1 database and its initial migration.
-A live `/api/status` request succeeded and advertises the Cloudflare AI models,
-Whisper, Nova-3, and registration-code protection. This confirms the Worker and
-bindings respond; it does not yet confirm successful model inference or a real
-iPhone microphone session. The native app defaults to this endpoint and moves
-the three retired preview hosts to it on launch. An earlier preview answered a
-Simulator screenshot with Qwen Vision in 6.6 seconds; a text voice turn streamed
-its first Qwen delta in 1.7 seconds and completed in 2.4 seconds. Those are
-single preview measurements, not latency measurements of the active Worker or
-iPhone microphone.
+The active Worker is build `20261023-cloudflare-detector-voice-gate-v18` and
+defaults to this endpoint; it moves the three retired preview hosts on launch.
+`/api/status` advertises Qwen, Moondream, and Whisper and marks realtime voice
+unavailable. A public Ultralytics bus image returned four generic obstacle
+boxes; inference took 481 ms and the full request took about 4 seconds. The
+boxes have no class label or confidence score. This verifies response parsing,
+not accuracy on a real walking scene. An earlier preview answered a Simulator
+screenshot with Qwen Vision in 6.6 seconds; a text voice turn streamed its first
+Qwen delta in 1.7 seconds and completed in 2.4 seconds. Those are single preview
+measurements, not latency measurements for the active Worker or an iPhone.
 
-Worker source build `20261023-cloudflare-voice-vi-v9` is deployed and opens
-Nova-3 directly through the Workers AI binding; it needs no AI Gateway or
-Deepgram key. The route is advertised by `/api/status`, and the iPhone falls
-back to on-device Speech plus Whisper if the cloud WebSocket fails. A real
-Vietnamese microphone session is still unverified. Deepgram lists Vietnamese
-(`vi`) for Nova-3, while its October 5, 2026 release only calls out a batch-model
-improvement for Vietnamese. Real-time transcription quality still needs a
-real-phone test. This is turn-taking, not full-duplex. Cloudflare model
-inference remains off the iPhone; ARKit LiDAR and camera capture stay on the
-phone.
+Cloudflare model inference remains off the iPhone; ARKit LiDAR and camera
+capture stay on the phone. A real iPhone 12 Pro Max camera, LiDAR, and microphone
+session is still unverified.
 Safari's PWA also supports voice, but cannot read ARKit depth, so the native app
 is the path that pairs vision boxes with sceneDepth from the same camera frame.
 

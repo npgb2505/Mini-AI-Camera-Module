@@ -6,20 +6,21 @@ miễn phí. Không cần sở hữu Mac. **PWA là đường thử ngay**; nati
 cài.
 
 **Tình trạng ngày 23/10/2026:** Worker đang chạy tại
-`https://ro-mobile-assistant.gfgfhtrffg.workers.dev`. D1 mới đã được tạo và
-migration khởi tạo đã chạy; `SESSION_SECRET` và mã đăng ký đã được cấu hình.
-`/api/status` trả lời thành công và quảng bá Qwen, Moondream, Whisper, Nova-3.
-Điều đó mới xác nhận Worker/binding trả trạng thái, chưa xác nhận suy luận AI,
-chất lượng thoại tiếng Việt hoặc hoạt động trên iPhone thật. App native nay
-điền URL đang chạy và tự chuyển ba địa chỉ preview cũ sang URL đó.
+`https://ro-mobile-assistant.gfgfhtrffg.workers.dev`. D1 và migration khởi tạo
+đã được cấu hình; `SESSION_SECRET` và mã đăng ký nằm trong Worker secrets.
+`/api/status` báo Qwen, Moondream, Whisper và `voice_realtime_ready=false`.
+Một ảnh bus công khai đã trả 4 boxes “vật cản” qua `/api/detect` (model 481 ms,
+toàn request khoảng 4 giây); chưa xác nhận trên camera iPhone. App native điền
+URL đang chạy và tự chuyển ba địa chỉ preview cũ sang URL đó.
 
 Đo trên preview lần trước: ảnh Simulator được Qwen trả lời trong 6,6 giây,
 token đầu của lượt thoại văn bản sau 1,7 giây và hoàn tất sau 2,4 giây. Đây là
-một lần đo mạng đơn lẻ, không phải độ trễ mic trên iPhone. Source hiện bật
-WebSocket Nova-3 khi Workers AI binding có sẵn; nếu luồng lỗi, app dự phòng
-bằng Speech trên iPhone và Whisper theo từng lượt. Vietnamese (`vi`) có trong
-bảng ngôn ngữ Nova-3, nhưng bản cải thiện ngày 5/10/2026 được Deepgram ghi là
-batch; chất lượng streaming tiếng Việt vẫn phải kiểm tra trên iPhone thật.
+một lần đo mạng đơn lẻ, không phải độ trễ mic trên iPhone. Native app hiện dùng
+Speech `vi-VN` của iPhone, Whisper theo lượt khi cần và Qwen cho câu trả lời.
+WebSocket Nova-3 đã nâng cấp HTTP thành công nhưng upstream lỗi trước khi nhận
+audio; do đó backend tắt cờ realtime cho tới khi kiểm tra được transcript tiếng
+Việt. Deepgram ghi bản cải thiện tiếng Việt ngày 5/10/2026 là batch. Chất lượng
+thoại vẫn cần kiểm tra trên iPhone thật.
 
 Native app có hành lang hình thang phủ lên camera, chỉ tính vật giao với vùng
 giữa và nằm trong tầm thử 2,5 m; vật xa hơn chỉ là ngữ cảnh. Địa chỉ cloud được
@@ -191,17 +192,16 @@ xác nhận có tiếng hay cảnh báo thật, và không bật MODE.
   `AVSpeechSynthesizer`; ở ESP32 mode, phát qua loa ESP32 là lựa chọn khác và
   cần firmware Wi-Fi hỗ trợ.
 - **Native voice conversation:** nút **Trò chuyện bằng giọng nói** cần quyền
-  Microphone. Nếu Worker báo `voice_realtime_ready=true`, app truyền PCM mono
-  16 kHz cùng ảnh mới tùy chọn qua `/api/voice/realtime`; transcript và câu trả
-  lời Qwen về theo luồng. Nếu không sẵn sàng hoặc kết nối lỗi, app xin quyền
-  Speech Recognition để hiện chữ tạm thời và phát hiện lúc kết thúc câu. Khi
-  Whisper Cloudflare sẵn sàng, app gửi audio của mỗi lượt lên Whisper Large v3
-  Turbo để lấy transcript chính; nếu Whisper lỗi, app dùng transcript iPhone.
-  Transcript, ảnh mới và LiDAR hiện hành được gửi tới Qwen; câu trả lời được
-  stream về và iPhone đọc. Audio không được ghi vào D1. Đây là hội thoại theo
-  lượt, chưa full-duplex. Source Worker mới dùng Nova-3 qua Workers AI binding,
-  không cần AI Gateway key; route chưa chạy trên endpoint live vì chưa deploy.
-  Dù Nova-3 liệt kê `vi`, chất lượng streaming tiếng Việt vẫn cần đo trên iPhone.
+  Microphone và Speech Recognition. Worker hiện báo
+  `voice_realtime_ready=false`, nên app dùng Speech `vi-VN` của iPhone để hiện
+  chữ tạm thời và phát hiện lúc kết thúc câu. Khi Whisper Cloudflare sẵn sàng,
+  app gửi audio của lượt đó lên Whisper Large v3 Turbo để lấy transcript chính;
+  nếu Whisper lỗi, app dùng transcript iPhone. Transcript, ảnh mới và LiDAR
+  hiện hành được gửi tới Qwen; câu trả lời được stream về và iPhone đọc. Audio
+  không được ghi vào D1. Đây là hội thoại theo lượt, chưa full-duplex. Kiểm tra
+  Worker đã nhận WebSocket nhưng upstream Nova-3 lỗi trước khi audio được gửi.
+  Deepgram ghi cập nhật tiếng Việt gần nhất là batch; realtime cần kiểm chứng
+  trước khi bật lại.
 - PWA có thêm tùy chọn ghi âm trong app khi backend đã cấu hình API phiên âm;
   nếu không, dùng Speech Recognition của Safari/iOS để nhận tiếng Việt và gửi
   phần chữ tới Qwen trên Cloudflare. PWA cần Safari qua HTTPS và bật Siri để
