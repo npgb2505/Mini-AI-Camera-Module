@@ -349,16 +349,16 @@ The original repository is read-only for the connected account, so the app-only
 branch was pushed to the public fork
 [`npgb2505/Mini-AI-Camera-Module`](https://github.com/npgb2505/Mini-AI-Camera-Module)
 as `codex/ios-lidar-test-2026-10-11`. No KiCad files were included. GitHub
-Actions run [39881683311](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39881683311)
-succeeded in 6m49s, passed eleven depth checks and two UI tests: one enters iPhone mode,
+Actions run [39883568308](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39883568308)
+succeeded in 4m17s, passed eleven depth checks and two UI tests: one enters iPhone mode,
 finds the LiDAR readout, and returns to the mode chooser; the other checks the
 native cloud-account form. It launched the app in the simulator, built the
 device app, and created `RoSight-unsigned-ipa`.
 The IPA is saved at
-`../../../04_App/ios_builds/2026-10-23-run-39881683311/RoSight-unsigned.ipa`
-(675,594 bytes, SHA-256 `B7D21FAE36DB7A26D71F0B4726DBB0D3C919B14A2A9732B19F9C1BFCDBDA1DB0`);
+`../../../04_App/ios_builds/2026-10-23-run-39883568308/RoSight-unsigned.ipa`
+(675,263 bytes, SHA-256 `A050D7F831C137B6E40FEA5E56C29CCA3B274CD7669C30E4F8686199BA4D0798`);
 the simulator launch image is at
-`../../../04_App/ios_builds/2026-10-23-run-39881683311-simulator/launch.png`.
+`../../../04_App/ios_builds/2026-10-23-run-39883568308-simulator/launch.png`.
 The IPA is arm64, targets iOS 16.0+, and is unsigned; AltServer on Windows must
 sign it before installation.
 Standard hosted runners are free for public repositories; private repositories

@@ -31,13 +31,13 @@ Các ngưỡng khoảng cách vẫn cần đo lại trên iPhone 12 Pro Max th�
 
 Native app và workflow đã được đẩy lên fork công khai
 `npgb2505/Mini-AI-Camera-Module`; repo gốc vẫn chỉ có quyền đọc. GitHub Actions
-run [39881683311](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39881683311)
-đã thành công sau 6m49s: 11 kiểm tra depth, 2 UI test: điều hướng chế độ iPhone và hiển thị form tạo tài khoản,
+run [39883568308](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39883568308)
+đã thành công sau 4m17s: 11 kiểm tra depth, 2 UI test: điều hướng chế độ iPhone và hiển thị form tạo tài khoản,
 mở app trên iPhone Simulator và build/upload IPA unsigned. IPA mới nhất nằm ở
-`../../../04_App/ios_builds/2026-10-23-run-39881683311/RoSight-unsigned.ipa`
-(675.594 byte, SHA-256 `B7D21FAE36DB7A26D71F0B4726DBB0D3C919B14A2A9732B19F9C1BFCDBDA1DB0`).
+`../../../04_App/ios_builds/2026-10-23-run-39883568308/RoSight-unsigned.ipa`
+(675.263 byte, SHA-256 `A050D7F831C137B6E40FEA5E56C29CCA3B274CD7669C30E4F8686199BA4D0798`).
 Ảnh khởi chạy Simulator nằm ở
-`../../../04_App/ios_builds/2026-10-23-run-39881683311-simulator/launch.png`.
+`../../../04_App/ios_builds/2026-10-23-run-39883568308-simulator/launch.png`.
 Simulator không có LiDAR iPhone; IPA chưa được ký, cài hoặc đo thử trên iPhone
 12 Pro Max thật.
 
@@ -99,7 +99,7 @@ PWA không cần IPA, chứng chỉ ký hay Apple Developer Program. Quick Tunne
 ### Chuẩn bị một workflow IPA
 
 1. Nhánh app đã được đưa lên fork công khai [`npgb2505/Mini-AI-Camera-Module`](https://github.com/npgb2505/Mini-AI-Camera-Module), branch `codex/ios-lidar-test-2026-10-11`. Chỉ mã native app, tài liệu app và workflow được gửi lên; không có file KiCad.
-2. Bản mới nhất đã qua 11 kiểm tra depth, 2 UI test: điều hướng chế độ iPhone và hiển thị form tạo tài khoản, mở app trên Simulator và build thành công là [GitHub Actions run 39881683311](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39881683311). IPA đã tải về máy tại `../../../04_App/ios_builds/2026-10-23-run-39881683311/RoSight-unsigned.ipa`. Ảnh màn hình khởi chạy Simulator nằm tại `../../../04_App/ios_builds/2026-10-23-run-39881683311-simulator/launch.png`. Artifact trên GitHub được giữ ba ngày; mỗi lần push mã app, bài kiểm tra hoặc cấu hình build sẽ tự chạy lại; chỉ sửa tài liệu thì không chạy lại build.
+2. Bản mới nhất đã qua 11 kiểm tra depth, 2 UI test: điều hướng chế độ iPhone và hiển thị form tạo tài khoản, mở app trên Simulator và build thành công là [GitHub Actions run 39883568308](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39883568308). IPA đã tải về máy tại `../../../04_App/ios_builds/2026-10-23-run-39883568308/RoSight-unsigned.ipa`. Ảnh màn hình khởi chạy Simulator nằm tại `../../../04_App/ios_builds/2026-10-23-run-39883568308-simulator/launch.png`. Artifact trên GitHub được giữ ba ngày; mỗi lần push mã app, bài kiểm tra hoặc cấu hình build sẽ tự chạy lại; chỉ sửa tài liệu thì không chạy lại build.
 3. iOS native cần Xcode trên macOS; Windows hiện tại không có `xcodebuild`/Swift iOS SDK. GitHub Actions đã dùng runner `macos-15` để build nên không cần sở hữu Mac. Lượt CI đã chứng minh app mở được ở Simulator và tạo IPA unsigned; phần cài trên iPhone vẫn phải ký bằng AltServer. Runner chuẩn miễn phí cho repo công khai; repo riêng dùng quota plan. Xem [runner GitHub-hosted](https://docs.github.com/en/actions/reference/runners/github-hosted-runners), [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions) và [yêu cầu Xcode của Apple](https://developer.apple.com/xcode/system-requirements/) nếu cần thay đổi cách build.
 4. Với lần build mới, mở tab **Actions** trong fork, chọn **Build iOS test IPA**, tải artifact `RoSight-unsigned-ipa` rồi giải nén để lấy `RoSight-unsigned.ipa`.
 
