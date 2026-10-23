@@ -207,26 +207,26 @@ not full-duplex. Raw microphone upload is disclosed by the permission prompt
 and voice-screen privacy text. The Worker does not store audio or camera frames
 in D1.
 
-The current preview is a temporary Cloudflare account at
-`https://ro-mobile-assistant-preview.slimy-kettle.workers.dev`. D1 is created
-and migration `0001_init.sql` is applied. `/api/status` reports Qwen 3.8 27B,
-Moondream 3.1, and Whisper Large v3 Turbo as ready. The Cloudflare claim page
-is open in Codex; the account must be claimed within 60 minutes to retain the
-Worker and D1. The app defaults to this endpoint and migrates both retired
-preview URLs on launch. A previous preview run on the same Worker build
-answered a Simulator screenshot with Qwen Vision in 6.6 seconds; its text voice
-turn streamed the first Qwen delta in 1.7 seconds and completed in 2.4 seconds.
-These are single preview measurements, not iPhone microphone latency.
+The last temporary preview URL was
+`https://ro-mobile-assistant-preview.slimy-kettle.workers.dev`. A status request
+on October 23, 2026 failed DNS resolution, so this is not a confirmed live
+endpoint now. The app still defaults to that URL and migrates both retired
+preview URLs on launch; it needs an authenticated deployment before it can
+connect. The last known preview run answered a Simulator screenshot with Qwen
+Vision in 6.6 seconds; a text voice turn streamed its first Qwen delta in 1.7
+seconds and completed in 2.4 seconds. These are single network measurements,
+not iPhone microphone latency.
 
-Nova-3 microphone WebSocket remains disabled because this Worker has no AI
-Gateway credentials and Vietnamese streaming has not been verified on this
-account. The native app uses iPhone Speech Recognition to show interim text and
-detect the end of each phrase, then sends captured audio to Cloudflare Whisper
-Large v3 Turbo for the primary Vietnamese transcript. If cloud transcription
-fails, it keeps the iPhone transcript and still sends the question and a fresh
-frame to Qwen. Qwen streams answer text back and iPhone reads it aloud. This is
-turn-taking near-realtime, not full-duplex. Cloudflare model inference remains
-off the iPhone; ARKit LiDAR and camera capture stay on the phone.
+Worker source build `20261023-cloudflare-voice-vi-v9` now opens Nova-3 directly
+through the Workers AI binding; it needs no AI Gateway or Deepgram key. The
+route is enabled by the binding and the iPhone falls back to on-device Speech
+plus Whisper if the cloud WebSocket fails. The source is not deployed because
+the Wrangler session is not authenticated. Deepgram lists Vietnamese (`vi`)
+for Nova-3, while its October 5, 2026 release only calls out a batch-model
+improvement for Vietnamese. Real-time transcription quality still needs a
+real-phone test. This is turn-taking, not full-duplex. Cloudflare model
+inference remains off the iPhone; ARKit LiDAR and camera capture stay on the
+phone.
 Safari's PWA also supports voice, but cannot read ARKit depth, so the native app
 is the path that pairs vision boxes with sceneDepth from the same camera frame.
 
