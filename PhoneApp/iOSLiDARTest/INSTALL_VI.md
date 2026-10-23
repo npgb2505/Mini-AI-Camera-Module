@@ -29,14 +29,15 @@ Các ngưỡng khoảng cách vẫn cần đo lại trên iPhone 12 Pro Max th�
 Native app và workflow đã được đẩy lên fork công khai
 `npgb2505/Mini-AI-Camera-Module`; repo gốc vẫn chỉ có quyền đọc. GitHub Actions
 run [39886118187](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39886118187)
-đã thành công sau 6m29s: 11 kiểm tra depth, 2 UI test (điều hướng chế độ iPhone
-và hiển thị form tạo tài khoản), mở app trên iPhone Simulator và build/upload
-IPA unsigned. Bản đó có nút kiểm tra backend/model trong Cài đặt. IPA được tạo
-trước khi Worker hoạt động, nên cần build lại để đóng gói URL mới. IPA cũ nằm ở
-`../../../04_App/ios_builds/2026-10-23-run-39886118187/RoSight-unsigned.ipa`
-(684.362 byte, SHA-256 `906A4895DED9CF1CD44A7A68530389E9BB7C4FB0FBADBD3A2DFF5290AA6A1F21`).
+đã thành công sau 6m29s. Bản mới nhất là
+[run 39890932193](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/39890932193),
+hoàn tất sau 7m34s: 11 kiểm tra depth, 2 UI test (điều hướng chế độ iPhone và
+hiển thị form tạo tài khoản), mở app trên iPhone Simulator, build/upload IPA
+unsigned với URL Worker mới. IPA nằm ở
+`../../../04_App/ios_builds/2026-10-23-run-39890932193/RoSight-unsigned.ipa`
+(684.353 byte, SHA-256 `C287DDD5F34C6E8F69B7CB38D69088D4D922FB82E1F58C9F9B4798FDEB5FC1A6`).
 Ảnh khởi chạy Simulator nằm ở
-`../../../04_App/ios_builds/2026-10-23-run-39886118187-simulator/launch.png`.
+`../../../04_App/ios_builds/2026-10-23-run-39890932193-simulator/launch.png`.
 Simulator không có LiDAR iPhone; IPA chưa được ký, cài hoặc đo thử trên iPhone
 12 Pro Max thật.
 
