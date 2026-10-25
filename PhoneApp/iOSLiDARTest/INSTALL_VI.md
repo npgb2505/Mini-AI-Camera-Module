@@ -5,10 +5,10 @@ miễn phí. Không cần sở hữu Mac. **PWA là đường thử ngay**; nati
 được build trên runner macOS của GitHub Actions rồi ký trên Windows trước khi
 cài.
 
-**Tình trạng ngày 25/10/2026:** Worker đang chạy tại
+**Tình trạng ngày 26/10/2026:** Worker đang chạy tại
 `https://ro-mobile-assistant.gfgfhtrffg.workers.dev`. D1 và migration khởi tạo
 đã được cấu hình; `SESSION_SECRET` và mã đăng ký nằm trong Worker secrets.
-Worker v26 dùng Qwen 3.8 27B, Moondream 3.1, Whisper Large v3 Turbo cho file
+Worker v27 dùng Qwen 3.8 27B, Moondream 3.1, Whisper Large v3 Turbo cho file
 ghi âm và Nova-3 cho realtime; `/api/status` báo realtime đã cấu hình.
 Đây chưa phải bằng chứng đã mở được phiên WebSocket hoặc nhận transcript từ
 micro iPhone.
@@ -39,6 +39,12 @@ hiển thị form tạo tài khoản), mở app trên iPhone Simulator, build/up
 unsigned với URL Worker mới. IPA nằm ở
 `../../../04_App/ios_builds/2026-10-23-run-39890932193/RoSight-unsigned.ipa`
 (684.353 byte, SHA-256 `C287DDD5F34C6E8F69B7CB38D69088D4D922FB82E1F58C9F9B4798FDEB5FC1A6`).
+Bản cập nhật nhận detection ESPDet-Pico cũng build thành công trên run
+[40218630398](https://github.com/npgb2505/Mini-AI-Camera-Module/actions/runs/40218630398):
+kiểm tra LiDAR, mở app và hai UI test đều qua; IPA unsigned đã tải về tại
+`../../../04_App/ios_builds/2026-10-26-run-40218630398/RoSight-unsigned.ipa`
+(684.514 byte, SHA-256 `EA636CDC5BCBE561C9B88A0DEF87222A1C39AE11087CE16649D5C5BAD8195E61`).
+Windows vẫn chưa nhận iPhone qua USB, nên bản này chưa được cài/chạy trên máy thật.
 Ảnh khởi chạy Simulator nằm ở
 `../../../04_App/ios_builds/2026-10-23-run-39890932193-simulator/launch.png`.
 Simulator không có LiDAR iPhone; IPA chưa được ký, cài hoặc đo thử trên iPhone
