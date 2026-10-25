@@ -5,22 +5,24 @@ miễn phí. Không cần sở hữu Mac. **PWA là đường thử ngay**; nati
 được build trên runner macOS của GitHub Actions rồi ký trên Windows trước khi
 cài.
 
-**Tình trạng ngày 23/10/2026:** Worker đang chạy tại
+**Tình trạng ngày 25/10/2026:** Worker đang chạy tại
 `https://ro-mobile-assistant.gfgfhtrffg.workers.dev`. D1 và migration khởi tạo
 đã được cấu hình; `SESSION_SECRET` và mã đăng ký nằm trong Worker secrets.
-`/api/status` báo Qwen, Moondream, Whisper và `voice_realtime_ready=false`.
+Worker v26 dùng Qwen 3.8 27B, Moondream 3.1, Whisper Large v3 Turbo cho file
+ghi âm và Nova-3 cho realtime; `/api/status` báo realtime đã cấu hình.
+Đây chưa phải bằng chứng đã mở được phiên WebSocket hoặc nhận transcript từ
+micro iPhone.
 Một ảnh bus công khai đã trả 4 boxes “vật cản” qua `/api/detect` (model 481 ms,
 toàn request khoảng 4 giây); chưa xác nhận trên camera iPhone. App native điền
 URL đang chạy và tự chuyển ba địa chỉ preview cũ sang URL đó.
 
 Đo trên preview lần trước: ảnh Simulator được Qwen trả lời trong 6,6 giây,
 token đầu của lượt thoại văn bản sau 1,7 giây và hoàn tất sau 2,4 giây. Đây là
-một lần đo mạng đơn lẻ, không phải độ trễ mic trên iPhone. Native app hiện dùng
-Speech `vi-VN` của iPhone, Whisper theo lượt khi cần và Qwen cho câu trả lời.
-WebSocket Nova-3 đã nâng cấp HTTP thành công nhưng upstream lỗi trước khi nhận
-audio; do đó backend tắt cờ realtime cho tới khi kiểm tra được transcript tiếng
-Việt. Deepgram ghi bản cải thiện tiếng Việt ngày 5/10/2026 là batch. Chất lượng
-thoại vẫn cần kiểm tra trên iPhone thật.
+một lần đo mạng đơn lẻ, không phải độ trễ mic trên iPhone. Native app ưu tiên
+luồng Nova-3, rồi Qwen; nếu realtime lỗi, app dùng Speech `vi-VN` của iPhone
+và Whisper Large v3 Turbo theo lượt khi backend sẵn sàng. Nova-3 multilingual
+hỗ trợ streaming tiếng Việt theo cập nhật Deepgram ngày 23/10/2026, nhưng phiên
+mic và transcript thật vẫn cần kiểm tra trên iPhone.
 
 Native app có hành lang hình thang phủ lên camera, chỉ tính vật giao với vùng
 giữa và nằm trong tầm thử 2,5 m; vật xa hơn chỉ là ngữ cảnh. Địa chỉ cloud được
@@ -192,21 +194,18 @@ xác nhận có tiếng hay cảnh báo thật, và không bật MODE.
   `AVSpeechSynthesizer`; ở ESP32 mode, phát qua loa ESP32 là lựa chọn khác và
   cần firmware Wi-Fi hỗ trợ.
 - **Native voice conversation:** nút **Trò chuyện bằng giọng nói** cần quyền
-  Microphone và Speech Recognition. Worker hiện báo
-  `voice_realtime_ready=false`, nên app dùng Speech `vi-VN` của iPhone để hiện
-  chữ tạm thời và phát hiện lúc kết thúc câu. Khi Whisper Cloudflare sẵn sàng,
-  app gửi audio của lượt đó lên Whisper Large v3 Turbo để lấy transcript chính;
-  nếu Whisper lỗi, app dùng transcript iPhone. Transcript, ảnh mới và LiDAR
-  hiện hành được gửi tới Qwen; câu trả lời được stream về và iPhone đọc. Audio
-  không được ghi vào D1. Đây là hội thoại theo lượt, chưa full-duplex. Kiểm tra
-  Worker đã nhận WebSocket nhưng upstream Nova-3 lỗi trước khi audio được gửi.
-  Deepgram ghi cập nhật tiếng Việt gần nhất là batch; realtime cần kiểm chứng
-  trước khi bật lại.
-- PWA có thêm tùy chọn ghi âm trong app khi backend đã cấu hình API phiên âm;
-  nếu không, dùng Speech Recognition của Safari/iOS để nhận tiếng Việt và gửi
-  phần chữ tới Qwen trên Cloudflare. PWA cần Safari qua HTTPS và bật Siri để
-  mở camera/mic; `speechSynthesis` đọc câu trả lời. Đây là hội thoại từng lượt,
-  chưa full-duplex.
+  Microphone và Speech Recognition. Worker v26 báo Nova-3 đã cấu hình; app thử
+  realtime PCM → Nova-3 → Qwen. Nếu luồng cloud lỗi, app chuyển sang Speech
+  `vi-VN` của iPhone, gửi transcript và ảnh/LiDAR hiện hành tới Qwen, rồi đọc
+  câu trả lời. Khi phiên âm file được bật, app gửi WAV của lượt nói tới Whisper
+  Large v3 Turbo để chỉnh transcript; nếu Whisper lỗi, dùng transcript iPhone.
+  Audio không được ghi vào D1. Barge-in và echo-cancellation cần kiểm chứng
+  bằng micro/loa thật; status `/api/status` chỉ phản ánh cấu hình.
+- **PWA:** ưu tiên truyền PCM realtime tới Nova-3; nếu luồng lỗi, tự chuyển sang
+  Speech Recognition của Safari/iOS và gửi transcript từng lượt tới Qwen.
+  Cần Safari qua HTTPS và quyền Microphone; nhánh Speech Recognition có thể
+  cần Siri được bật. `speechSynthesis` đọc câu trả lời. Mic iPhone thật và
+  hành vi ngắt lời vẫn cần thử.
 - Câu hỏi gửi tới máy chủ Ro Sight. Moondream/YOLO server chỉ dùng cho camera
   iPhone; ESP32 cần FOMO cục bộ sau khi có artifact đã huấn luyện. Vision
   có thể chạy cục bộ nếu backend được cấu hình model local; nếu chọn dịch vụ API

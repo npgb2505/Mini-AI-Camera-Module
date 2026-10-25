@@ -805,13 +805,21 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         deviceConnection?.status
     }
 
+    private func isSupportedDeviceDetectorModel(_ modelID: String?) -> Bool {
+        guard let modelID else {
+            return false
+        }
+        let normalized = modelID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.hasPrefix("fomo:") || normalized.hasPrefix("espdet:")
+    }
+
     var deviceFomoOutputForCurrentFrame: Bool {
         guard deviceConnection?.transport == "firmware_wifi",
               deviceConnection?.deviceConnected == true,
               deviceOperationEnabled == true,
               let status = deviceStatusSnapshot,
               status.source == "device",
-              status.detectorModel?.lowercased().hasPrefix("fomo:") == true,
+              isSupportedDeviceDetectorModel(status.detectorModel),
               status.inferenceStatus == "ok",
               let frameSequence = deviceFrameSequence,
               status.resolvedDetectionsFrameSeq == frameSequence,
@@ -826,26 +834,26 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
     var deviceFomoStatusMessage: String {
         guard deviceConnection?.transport == "firmware_wifi" else {
-            return "ESP32 FOMO đang chờ artifact đã huấn luyện và output từ firmware qua Wi-Fi. BLE chỉ mang status, ToF và nút; USB bridge không xác nhận FOMO."
+            return "ESP32 detector đang chờ model và output từ firmware qua Wi-Fi. BLE chỉ mang status, ToF và nút; USB bridge không xác nhận inference."
         }
         guard let status = deviceStatusSnapshot,
               status.source == "device" else {
-            return "Đang chờ snapshot firmware có trạng thái FOMO."
+            return "Đang chờ snapshot detector từ firmware."
         }
         let modelID = status.detectorModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard modelID.lowercased().hasPrefix("fomo:") else {
-            return "ESP32-local FOMO đang chờ artifact đã huấn luyện; detector firmware hiện chưa báo model FOMO."
+        guard isSupportedDeviceDetectorModel(modelID) else {
+            return "ESP32 chưa báo model detector được hỗ trợ (FOMO hoặc ESPDet-Pico)."
         }
         guard status.inferenceStatus == "ok" else {
-            return "Firmware có khai báo model FOMO nhưng chưa báo inference thành công. App chưa hiển thị kết quả."
+            return "Firmware có model \(modelID) nhưng chưa báo inference thành công. App chưa hiển thị kết quả."
         }
         guard deviceFomoOutputForCurrentFrame else {
-            return "Đang chờ output FOMO mới cùng boot và frame JPEG hiện tại; output cũ hoặc không khớp bị ẩn."
+            return "Đang chờ detection mới cùng boot và frame JPEG hiện tại; output cũ hoặc không khớp bị ẩn."
         }
         if deviceDetections.isEmpty {
-            return "Firmware FOMO đã xử lý frame \(deviceFrameSequence ?? 0); chưa phát hiện vật thể trong frame này."
+            return "Firmware đã xử lý frame \(deviceFrameSequence ?? 0); chưa phát hiện vật thể trong frame này."
         }
-        return "FOMO ESP32 · frame \(deviceFrameSequence ?? 0) · model \(modelID)."
+        return "ESP32 detector · frame \(deviceFrameSequence ?? 0) · model \(modelID)."
     }
 
     var deviceOperationEnabled: Bool? {
@@ -2917,11 +2925,11 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         } ?? false
         let detectionsBootMatches = deviceConnection?.transport != "firmware_wifi"
             || status.detectionsBootId == status.deviceHealth?.bootId
-        let firmwareFomoOutput = deviceConnection?.transport == "firmware_wifi"
+        let firmwareDetectorOutput = deviceConnection?.transport == "firmware_wifi"
             && status.source == "device"
-            && status.detectorModel?.lowercased().hasPrefix("fomo:") == true
+            && isSupportedDeviceDetectorModel(status.detectorModel)
             && status.inferenceStatus == "ok"
-        if firmwareFomoOutput, detectionsFresh, detectionsBootMatches,
+        if firmwareDetectorOutput, detectionsFresh, detectionsBootMatches,
            status.resolvedDetectionsFrameSeq == frameSequence {
             deviceDetections = status.detections ?? []
         } else {
