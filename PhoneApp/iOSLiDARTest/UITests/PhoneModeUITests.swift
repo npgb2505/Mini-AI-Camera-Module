@@ -19,8 +19,9 @@ final class PhoneModeUITests: XCTestCase {
         XCTAssertTrue(phoneModeButton.waitForExistence(timeout: 5))
     }
 
-    func testWalkingDirectionsOpensWithoutRequestingLocationAndReturnsToChooser() {
+    func testWalkingDirectionsSearchesPreviewsRouteAndHandsOffToMapsAfterDestinationSelection() {
         let app = XCUIApplication()
+        app.launchArguments.append("--ui-testing-navigation")
         app.launch()
 
         let directionsButton = app.buttons["mode.navigation"]
@@ -30,6 +31,33 @@ final class PhoneModeUITests: XCTestCase {
         XCTAssertTrue(app.textFields["navigation.destination-query"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["navigation.search"].exists)
         XCTAssertTrue(app.buttons["Quay lại chọn chế độ"].exists)
+
+        let query = app.textFields["navigation.destination-query"]
+        query.tap()
+        query.typeText("Bao tang Cham")
+        app.buttons["navigation.search"].tap()
+
+        let locationRequestCount = app.staticTexts["navigation.location-request-count"]
+        XCTAssertTrue(locationRequestCount.waitForExistence(timeout: 5))
+        XCTAssertEqual(locationRequestCount.label, "Yêu cầu vị trí: 0", "Searching must not request location.")
+
+        let destination = app.buttons["navigation.destination-result.ui-test-destination"]
+        XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        XCTAssertTrue(destination.label.contains("Bảo tàng Điêu khắc Chăm"))
+        destination.tap()
+
+        let distance = app.descendants(matching: .any)["navigation.route.distance"]
+        XCTAssertTrue(distance.waitForExistence(timeout: 5))
+        XCTAssertTrue(distance.label.contains("1.2 km"))
+        let instruction = app.descendants(matching: .any)["navigation.route.instruction"]
+        XCTAssertTrue(instruction.waitForExistence(timeout: 5))
+        XCTAssertTrue(instruction.label.contains("Đi thẳng về hướng đường Bạch Đằng"))
+        XCTAssertEqual(locationRequestCount.label, "Yêu cầu vị trí: 1", "The route may request location after a destination is selected.")
+
+        let mapsButton = app.buttons["navigation.open-apple-maps"]
+        XCTAssertTrue(mapsButton.exists)
+        mapsButton.tap()
+        XCTAssertTrue(app.staticTexts["navigation.maps-handoff-state"].waitForExistence(timeout: 5))
 
         app.buttons["Quay lại chọn chế độ"].tap()
         XCTAssertTrue(directionsButton.waitForExistence(timeout: 5))

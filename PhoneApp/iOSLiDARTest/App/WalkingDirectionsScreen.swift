@@ -20,6 +20,101 @@ private struct WalkingStep: Identifiable {
     let distanceMeters: CLLocationDistance
 }
 
+private struct WalkingRoutePreview {
+    let distanceMeters: CLLocationDistance
+    let expectedTravelTime: TimeInterval
+    let steps: [WalkingStep]
+    let polyline: MKPolyline?
+}
+
+@MainActor
+private protocol WalkingDirectionsProviding {
+    var isUITestFixture: Bool { get }
+    func searchPlaces(query: String, near location: CLLocationCoordinate2D?) async throws -> [WalkingPlaceResult]
+    func walkingRoute(from origin: CLLocation, to destination: WalkingPlaceResult) async throws -> WalkingRoutePreview
+    func openMaps(destination: CLLocationCoordinate2D, name: String)
+}
+
+@MainActor
+private struct MapKitWalkingDirectionsProvider: WalkingDirectionsProviding {
+    var isUITestFixture: Bool { false }
+
+    func searchPlaces(query: String, near location: CLLocationCoordinate2D?) async throws -> [WalkingPlaceResult] {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        if let location {
+            request.region = MKCoordinateRegion(center: location, latitudinalMeters: 20_000, longitudinalMeters: 20_000)
+        }
+        let response = try await MKLocalSearch(request: request).start()
+        return response.mapItems.enumerated().map { index, item in
+            WalkingPlaceResult(id: "\(index)-\(item.name ?? query)", item: item)
+        }
+    }
+
+    func walkingRoute(from origin: CLLocation, to destination: WalkingPlaceResult) async throws -> WalkingRoutePreview {
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: origin.coordinate))
+        request.destination = destination.item
+        request.transportType = .walking
+        request.requestsAlternateRoutes = true
+        let response = try await MKDirections(request: request).calculate()
+        guard let route = response.routes.first else { throw WalkingDirectionsError.noWalkingRoute }
+        let steps = route.steps.enumerated().compactMap { index, step in
+            let instruction = step.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !instruction.isEmpty else { return nil }
+            return WalkingStep(id: index, instruction: instruction, distanceMeters: step.distance)
+        }
+        return WalkingRoutePreview(
+            distanceMeters: route.distance,
+            expectedTravelTime: route.expectedTravelTime,
+            steps: steps,
+            polyline: route.polyline
+        )
+    }
+
+    func openMaps(destination: CLLocationCoordinate2D, name: String) {
+        let destinationItem = MKMapItem(placemark: MKPlacemark(coordinate: destination))
+        destinationItem.name = name
+        MKMapItem.openMaps(
+            with: [MKMapItem.forCurrentLocation(), destinationItem],
+            launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking]
+        )
+    }
+}
+
+private enum WalkingDirectionsError: Error {
+    case noWalkingRoute
+}
+
+#if DEBUG
+@MainActor
+private struct UITestWalkingDirectionsProvider: WalkingDirectionsProviding {
+    var isUITestFixture: Bool { true }
+
+    func searchPlaces(query: String, near location: CLLocationCoordinate2D?) async throws -> [WalkingPlaceResult] {
+        let item = MKMapItem(
+            placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: 16.0601, longitude: 108.2237))
+        )
+        item.name = "Bảo tàng Điêu khắc Chăm"
+        return [WalkingPlaceResult(id: "ui-test-destination", item: item)]
+    }
+
+    func walkingRoute(from origin: CLLocation, to destination: WalkingPlaceResult) async throws -> WalkingRoutePreview {
+        WalkingRoutePreview(
+            distanceMeters: 1_240,
+            expectedTravelTime: 900,
+            steps: [
+                WalkingStep(id: 0, instruction: "Đi thẳng về hướng đường Bạch Đằng", distanceMeters: 180),
+                WalkingStep(id: 1, instruction: "Rẽ phải vào đường Trần Phú", distanceMeters: 260)
+            ],
+            polyline: MKPolyline(coordinates: [origin.coordinate, destination.item.placemark.coordinate], count: 2)
+        )
+    }
+
+    func openMaps(destination: CLLocationCoordinate2D, name: String) {}
+}
+#endif
+
 @MainActor
 private final class WalkingDirectionsModel: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var query = ""
@@ -27,18 +122,24 @@ private final class WalkingDirectionsModel: NSObject, ObservableObject, CLLocati
     @Published private(set) var selectedDestinationName: String?
     @Published private(set) var selectedDestination: CLLocationCoordinate2D?
     @Published private(set) var currentLocation: CLLocationCoordinate2D?
-    @Published private(set) var route: MKRoute?
+    @Published private(set) var route: WalkingRoutePreview?
     @Published private(set) var steps: [WalkingStep] = []
     @Published private(set) var isSearching = false
     @Published private(set) var isCalculatingRoute = false
     @Published private(set) var status = "Nhập địa điểm cần đến để tìm tuyến đi bộ."
     @Published private(set) var authorizationStatus: CLAuthorizationStatus = .notDetermined
+#if DEBUG
+    @Published private(set) var testLocationRequestCount = 0
+    @Published private(set) var testMapsHandoffRequested = false
+#endif
 
+    private let provider: any WalkingDirectionsProviding
     private let locationManager = CLLocationManager()
     private var pendingDestination: WalkingPlaceResult?
     private var routeRequestID = UUID()
 
-    override init() {
+    init(provider: any WalkingDirectionsProviding = MapKitWalkingDirectionsProvider()) {
+        self.provider = provider
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
@@ -56,23 +157,10 @@ private final class WalkingDirectionsModel: NSObject, ObservableObject, CLLocati
         status = "Đang tìm địa điểm…"
         route = nil
         steps = []
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = value
-        if let currentLocation {
-            request.region = MKCoordinateRegion(
-                center: currentLocation,
-                latitudinalMeters: 20_000,
-                longitudinalMeters: 20_000
-            )
-        }
-        let search = MKLocalSearch(request: request)
         Task {
             defer { isSearching = false }
             do {
-                let response = try await search.start()
-                searchResults = response.mapItems.enumerated().map { index, item in
-                    WalkingPlaceResult(id: "\(index)-\(item.name ?? value)", item: item)
-                }
+                searchResults = try await provider.searchPlaces(query: value, near: currentLocation)
                 status = searchResults.isEmpty
                     ? "Không tìm thấy địa điểm phù hợp. Thử thêm quận hoặc thành phố."
                     : "Chọn đúng địa điểm để tính tuyến đi bộ."
@@ -89,6 +177,15 @@ private final class WalkingDirectionsModel: NSObject, ObservableObject, CLLocati
         route = nil
         steps = []
         pendingDestination = result
+        if provider.isUITestFixture {
+#if DEBUG
+            testLocationRequestCount += 1
+#endif
+            let origin = CLLocation(latitude: 16.0678, longitude: 108.2208)
+            currentLocation = origin.coordinate
+            calculateWalkingRoute(from: origin, to: result)
+            return
+        }
         switch locationManager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse:
             status = "Đang lấy vị trí hiện tại để tính tuyến đi bộ…"
@@ -141,12 +238,13 @@ private final class WalkingDirectionsModel: NSObject, ObservableObject, CLLocati
     func openInAppleMaps() {
         guard let destination = selectedDestination,
               let destinationName = selectedDestinationName else { return }
-        let destinationItem = MKMapItem(placemark: MKPlacemark(coordinate: destination))
-        destinationItem.name = destinationName
-        MKMapItem.openMaps(
-            with: [MKMapItem.forCurrentLocation(), destinationItem],
-            launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking]
-        )
+        provider.openMaps(destination: destination, name: destinationName)
+        if provider.isUITestFixture {
+#if DEBUG
+            testMapsHandoffRequested = true
+#endif
+            status = "Đã yêu cầu mở Apple Maps (kiểm thử)."
+        }
     }
 
     func startNewSearch() {
@@ -165,34 +263,26 @@ private final class WalkingDirectionsModel: NSObject, ObservableObject, CLLocati
         routeRequestID = requestID
         isCalculatingRoute = true
         status = "Đang tính tuyến đi bộ tới \(destination.title)…"
-        let request = MKDirections.Request()
-        request.source = MKMapItem(placemark: MKPlacemark(coordinate: origin.coordinate))
-        request.destination = destination.item
-        request.transportType = .walking
-        request.requestsAlternateRoutes = true
         Task {
             defer {
                 if routeRequestID == requestID { isCalculatingRoute = false }
             }
             do {
-                let response = try await MKDirections(request: request).calculate()
                 guard routeRequestID == requestID else { return }
-                guard let walkingRoute = response.routes.first else {
-                    status = "Không có tuyến đi bộ phù hợp tới địa điểm này."
-                    return
-                }
-                route = walkingRoute
-                steps = walkingRoute.steps.enumerated().compactMap { index, step in
-                    let instruction = step.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !instruction.isEmpty else { return nil }
-                    return WalkingStep(id: index, instruction: instruction, distanceMeters: step.distance)
-                }
+                let preview = try await provider.walkingRoute(from: origin, to: destination)
+                guard routeRequestID == requestID else { return }
+                route = preview
+                steps = preview.steps
                 status = "Đã tính tuyến đi bộ. Mở Apple Maps để bắt đầu dẫn đường từng chặng."
             } catch {
                 guard routeRequestID == requestID else { return }
                 route = nil
                 steps = []
-                status = "Không tính được tuyến đi bộ. Kiểm tra mạng hoặc thử địa điểm khác."
+                if error is WalkingDirectionsError {
+                    status = "Không có tuyến đi bộ phù hợp tới địa điểm này."
+                } else {
+                    status = "Không tính được tuyến đi bộ. Kiểm tra mạng hoặc thử địa điểm khác."
+                }
             }
         }
     }
@@ -201,7 +291,7 @@ private final class WalkingDirectionsModel: NSObject, ObservableObject, CLLocati
 private struct WalkingRouteMap: UIViewRepresentable {
     let currentLocation: CLLocationCoordinate2D?
     let destination: CLLocationCoordinate2D?
-    let route: MKRoute?
+    let routePolyline: MKPolyline?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -223,10 +313,10 @@ private struct WalkingRouteMap: UIViewRepresentable {
             annotation.title = "Điểm đến"
             map.addAnnotation(annotation)
         }
-        if let route {
-            map.addOverlay(route.polyline)
+        if let routePolyline {
+            map.addOverlay(routePolyline)
             map.setVisibleMapRect(
-                route.polyline.boundingMapRect,
+                routePolyline.boundingMapRect,
                 edgePadding: UIEdgeInsets(top: 44, left: 32, bottom: 44, right: 32),
                 animated: true
             )
@@ -253,7 +343,19 @@ private struct WalkingRouteMap: UIViewRepresentable {
 
 struct WalkingDirectionsScreen: View {
     let onBack: () -> Void
-    @StateObject private var model = WalkingDirectionsModel()
+    @StateObject private var model: WalkingDirectionsModel
+
+    init(onBack: @escaping () -> Void) {
+        self.onBack = onBack
+#if DEBUG
+        let provider: any WalkingDirectionsProviding = ProcessInfo.processInfo.arguments.contains("--ui-testing-navigation")
+            ? UITestWalkingDirectionsProvider()
+            : MapKitWalkingDirectionsProvider()
+#else
+        let provider: any WalkingDirectionsProviding = MapKitWalkingDirectionsProvider()
+#endif
+        _model = StateObject(wrappedValue: WalkingDirectionsModel(provider: provider))
+    }
 
     var body: some View {
         ZStack {
@@ -266,6 +368,12 @@ struct WalkingDirectionsScreen: View {
                     .foregroundStyle(.white.opacity(0.72))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityAddTraits(.updatesFrequently)
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--ui-testing-navigation") {
+                    Text("Yêu cầu vị trí: \(model.testLocationRequestCount)")
+                        .accessibilityIdentifier("navigation.location-request-count")
+                }
+#endif
 
                 if let route = model.route {
                     routeDetails(route)
@@ -368,24 +476,26 @@ struct WalkingDirectionsScreen: View {
                         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 15))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("navigation.destination-result.\(place.id)")
                 }
             }
         }
     }
 
-    private func routeDetails(_ route: MKRoute) -> some View {
+    private func routeDetails(_ route: WalkingRoutePreview) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             WalkingRouteMap(
                 currentLocation: model.currentLocation,
                 destination: model.selectedDestination,
-                route: route
+                routePolyline: route.polyline
             )
             .frame(height: 230)
             .clipShape(RoundedRectangle(cornerRadius: 18))
             .accessibilityLabel("Bản đồ tuyến đi bộ tới \(model.selectedDestinationName ?? "điểm đến")")
 
             HStack(spacing: 16) {
-                Label(String(format: "%.1f km", route.distance / 1_000), systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                Label(String(format: "%.1f km", route.distanceMeters / 1_000), systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                    .accessibilityIdentifier("navigation.route.distance")
                 Label(Self.durationLabel(route.expectedTravelTime), systemImage: "clock")
             }
             .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -398,6 +508,7 @@ struct WalkingDirectionsScreen: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(13)
                     .background(.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 14))
+                    .accessibilityIdentifier("navigation.route.instruction")
             }
 
             HStack {
@@ -416,6 +527,12 @@ struct WalkingDirectionsScreen: View {
                 }
                 .accessibilityIdentifier("navigation.open-apple-maps")
             }
+#if DEBUG
+            if model.testMapsHandoffRequested {
+                Text("Đã yêu cầu mở Apple Maps (kiểm thử).")
+                    .accessibilityIdentifier("navigation.maps-handoff-state")
+            }
+#endif
 
             Text("Tuyến tính từ bản đồ; app chưa kiểm tra lề đường, cầu thang, công trình hoặc lối đi bộ có thể sử dụng. Hãy xác nhận bằng Apple Maps và môi trường thực tế.")
                 .font(.system(size: 10, weight: .regular, design: .rounded))
