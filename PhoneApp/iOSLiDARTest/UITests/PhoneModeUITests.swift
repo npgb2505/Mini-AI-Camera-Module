@@ -46,10 +46,10 @@ final class PhoneModeUITests: XCTestCase {
         XCTAssertTrue(destination.label.contains("Bảo tàng Điêu khắc Chăm"))
         destination.tap()
 
-        let distance = app.descendants(matching: .any)["navigation.route.distance"]
+        let distance = app.staticTexts["navigation.route.distance"]
         XCTAssertTrue(distance.waitForExistence(timeout: 5))
         XCTAssertTrue(distance.label.contains("1.2 km"))
-        let instruction = app.descendants(matching: .any)["navigation.route.instruction"]
+        let instruction = app.staticTexts["navigation.route.instruction"]
         XCTAssertTrue(instruction.waitForExistence(timeout: 5))
         XCTAssertTrue(instruction.label.contains("Đi thẳng về hướng đường Bạch Đằng"))
         XCTAssertEqual(locationRequestCount.label, "Yêu cầu vị trí: 1", "The route may request location after a destination is selected.")
