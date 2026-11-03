@@ -37,7 +37,7 @@ jobs:
             -o .build/depth-checks/depth-snapshot-checks
           .build/depth-checks/depth-snapshot-checks
 
-      - name: Launch iPhone Simulator smoke
+      - name: Select iPhone Simulator
         run: |
           SIMULATOR_INFO="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); x=next((v for group in d["devices"].values() for v in group if v.get("name")=="iPhone 16" and v.get("isAvailable")),None); print("{} {}".format(x["udid"],x["state"]) if x else "")')"
           if [ -z "$SIMULATOR_INFO" ]; then
@@ -47,7 +47,12 @@ jobs:
           SIMULATOR_ID="${SIMULATOR_INFO%% *}"
           SIMULATOR_STATE="${SIMULATOR_INFO#* }"
           echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
+          echo "SIMULATOR_STATE=$SIMULATOR_STATE" >> "$GITHUB_ENV"
           echo "Using iPhone 16 simulator $SIMULATOR_ID ($SIMULATOR_STATE)."
+
+      - name: Build Debug iPhone Simulator app
+        timeout-minutes: 8
+        run: |
           xcodebuild \
             -project RoSight.xcodeproj \
             -scheme RoSight \
@@ -57,6 +62,10 @@ jobs:
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY='-'
+
+      - name: Launch iPhone Simulator smoke
+        timeout-minutes: 5
+        run: |
           if [ "$SIMULATOR_STATE" != "Booted" ]; then
             xcrun simctl boot "$SIMULATOR_ID"
           fi
