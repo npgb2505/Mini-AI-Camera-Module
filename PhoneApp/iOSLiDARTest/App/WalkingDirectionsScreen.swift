@@ -138,7 +138,7 @@ private final class WalkingDirectionsModel: NSObject, ObservableObject, CLLocati
     private var pendingDestination: WalkingPlaceResult?
     private var routeRequestID = UUID()
 
-    init(provider: any WalkingDirectionsProviding = MapKitWalkingDirectionsProvider()) {
+    init(provider: any WalkingDirectionsProviding) {
         self.provider = provider
         super.init()
         locationManager.delegate = self
