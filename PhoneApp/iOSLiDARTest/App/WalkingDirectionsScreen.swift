@@ -59,7 +59,7 @@ private struct MapKitWalkingDirectionsProvider: WalkingDirectionsProviding {
         request.requestsAlternateRoutes = true
         let response = try await MKDirections(request: request).calculate()
         guard let route = response.routes.first else { throw WalkingDirectionsError.noWalkingRoute }
-        let steps = route.steps.enumerated().compactMap { index, step in
+        let steps: [WalkingStep] = route.steps.enumerated().compactMap { index, step in
             let instruction = step.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !instruction.isEmpty else { return nil }
             return WalkingStep(id: index, instruction: instruction, distanceMeters: step.distance)
