@@ -4,6 +4,7 @@ import UIKit
 private enum RoSightMode: Equatable {
     case device
     case phone
+    case navigation
 }
 
 struct CameraScreen: View {
@@ -12,6 +13,7 @@ struct CameraScreen: View {
     @AppStorage("roSight.backendURL") private var backendURL = "https://ro-mobile-assistant.gfgfhtrffg.workers.dev"
     @AppStorage("roSight.accountUsername") private var accountUsername = ""
     @AppStorage("roSight.phoneProximityAlertsEnabled") private var phoneProximityAlertsEnabled = true
+    @AppStorage("roSight.phoneHapticsEnabled") private var phoneHapticsEnabled = true
     @State private var accountPassword = ""
     @State private var accessUsername = ""
     @State private var accessPassword = ""
@@ -33,6 +35,8 @@ struct CameraScreen: View {
                 phoneModeContent
             } else if selectedMode == .device {
                 deviceModeContent
+            } else if selectedMode == .navigation {
+                WalkingDirectionsScreen(onBack: { selectMode(nil) })
             } else {
                 modeChooser
             }
@@ -119,6 +123,7 @@ struct CameraScreen: View {
             Text(credentialError)
         }
         .onAppear {
+            model.setPhoneHapticsEnabled(phoneHapticsEnabled)
             let retiredCloudflareHosts: Set<String> = [
                 "ro-mobile-assistant.airy-clave.workers.dev",
                 "ro-mobile-assistant-preview.diamond-fold.workers.dev",
@@ -189,6 +194,16 @@ struct CameraScreen: View {
                     identifier: "mode.phone"
                 ) {
                     selectMode(.phone)
+                }
+
+                modeCard(
+                    title: "Chỉ đường đi bộ",
+                    subtitle: "Tìm địa điểm, xem tuyến đi bộ và mở dẫn đường từng chặng trong Apple Maps.",
+                    symbol: "figure.walk",
+                    tint: .cyan,
+                    identifier: "mode.navigation"
+                ) {
+                    selectMode(.navigation)
                 }
 
                 Spacer(minLength: 0)
@@ -279,9 +294,13 @@ struct CameraScreen: View {
             }
             .onAppear {
                 model.setPhoneProximityAlertsEnabled(phoneProximityAlertsEnabled)
+                model.setPhoneHapticsEnabled(phoneHapticsEnabled)
             }
             .onChange(of: phoneProximityAlertsEnabled) { enabled in
                 model.setPhoneProximityAlertsEnabled(enabled)
+            }
+            .onChange(of: phoneHapticsEnabled) { enabled in
+                model.setPhoneHapticsEnabled(enabled)
             }
         }
     }
@@ -405,10 +424,10 @@ struct CameraScreen: View {
         VStack(alignment: .leading, spacing: 12) {
             Toggle(isOn: $phoneProximityAlertsEnabled) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Đọc cảnh báo khoảng cách")
+                    Text("Cảnh báo khoảng cách")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("iPhone sẽ đọc số đo tâm dưới 0,8 m; phát lại sau khi vượt 1,05 m.")
+                    Text("Cảnh báo khi LiDAR đo bề mặt tại tâm ≤ 0,8 m; phát lại sau khi vượt 1,05 m.")
                         .font(.system(size: 10, weight: .regular, design: .rounded))
                         .foregroundStyle(.white.opacity(0.65))
                         .fixedSize(horizontal: false, vertical: true)
@@ -418,6 +437,22 @@ struct CameraScreen: View {
             .accessibilityLabel("Cảnh báo khoảng cách LiDAR trên iPhone")
             .accessibilityValue(phoneProximityAlertsEnabled ? "Bật" : "Tắt")
             .accessibilityHint("Chỉ đọc số đo sceneDepth mới tại tâm khung hình. Cảnh báo không phân loại vật cản hoặc lối đi.")
+
+            Toggle(isOn: $phoneHapticsEnabled) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Rung cảnh báo trên iPhone")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("Rung một lần khi số đo mới vượt ngưỡng gần; phát lại sau khi lùi ra xa.")
+                        .font(.system(size: 10, weight: .regular, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(.cyan)
+            .accessibilityLabel("Rung cảnh báo khoảng cách trên iPhone")
+            .accessibilityValue(phoneHapticsEnabled ? "Bật" : "Tắt")
+            .accessibilityHint("Dùng bộ rung của iPhone khi LiDAR báo bề mặt gần. Không điều khiển motor rung ESP32.")
 
             Text(model.phoneProximityAlertStatus)
                 .font(.system(size: 10, weight: .medium, design: .rounded))

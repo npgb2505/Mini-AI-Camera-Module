@@ -19,6 +19,22 @@ final class PhoneModeUITests: XCTestCase {
         XCTAssertTrue(phoneModeButton.waitForExistence(timeout: 5))
     }
 
+    func testWalkingDirectionsOpensWithoutRequestingLocationAndReturnsToChooser() {
+        let app = XCUIApplication()
+        app.launch()
+
+        let directionsButton = app.buttons["mode.navigation"]
+        XCTAssertTrue(directionsButton.waitForExistence(timeout: 10))
+        directionsButton.tap()
+
+        XCTAssertTrue(app.textFields["navigation.destination-query"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["navigation.search"].exists)
+        XCTAssertTrue(app.buttons["Quay lại chọn chế độ"].exists)
+
+        app.buttons["Quay lại chọn chế độ"].tap()
+        XCTAssertTrue(directionsButton.waitForExistence(timeout: 5))
+    }
+
     func testNativeSettingsCanCreateACloudAccount() {
         let app = XCUIApplication()
         app.launch()

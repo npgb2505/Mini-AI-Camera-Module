@@ -137,7 +137,9 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     private var phoneDetectionFrameJPEG: Data?
     private var phoneDepthUpdatedAt: Date?
     private var phoneProximityAlertsEnabled = true
+    private var phoneHapticsEnabled = true
     private var phoneNearReadingLatched = false
+    private var deviceToFNearLatched = false
     private var phoneDetectionsCapturedAt: Date?
     private var lastVisionStatusCheck: Date?
     private var phoneModeActive = false
@@ -477,6 +479,10 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         phoneProximityAlertStatus = "Đã bật; đang chờ số đo LiDAR mới để đọc cảnh báo."
     }
 
+    func setPhoneHapticsEnabled(_ enabled: Bool) {
+        phoneHapticsEnabled = enabled
+    }
+
     private func updatePhoneProximityAlert(for distance: Double?) {
         guard phoneProximityAlertsEnabled else { return }
         guard let distance else {
@@ -491,6 +497,11 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                 .replacingOccurrences(of: ".", with: ",")
             let message = "LiDAR đo bề mặt tại tâm khung hình ở khoảng \(formattedDistance) mét. Đây là số đo ước tính."
             phoneProximityAlertStatus = "Cảnh báo LiDAR: \(message)"
+            if phoneHapticsEnabled {
+                let generator = UINotificationFeedbackGenerator()
+                generator.prepare()
+                generator.notificationOccurred(.warning)
+            }
             announcePhoneProximityAlert(message)
             return
         }
@@ -544,6 +555,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         phoneSceneDepthSupported = nil
         phoneNearReadingLatched = false
         phoneProximityAlertStatus = "Chưa có số đo LiDAR mới."
+        deviceToFNearLatched = false
         detections = []
         phoneHazardZones = []
         answer = ""
@@ -1397,6 +1409,7 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             deviceStatusReceivedAtUptime = ProcessInfo.processInfo.systemUptime
             deviceConnection = connection
             deviceError = nil
+            updateDeviceToFHaptic(for: connection)
             buttonAction = acceptDeviceButtonEvent(from: connection, sessionGeneration: generation)
         } catch {
             guard !Task.isCancelled, generation == authenticationGeneration else { return }
@@ -1453,6 +1466,46 @@ final class CameraModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                 deviceAskError = "Chưa có JPEG mới khớp frame ESP32; Vision chưa được gọi."
                 deviceButtonMessage = "Nút hỏi AI đã được xử lý nhưng JPEG chưa sẵn sàng."
             }
+        }
+    }
+
+    private func updateDeviceToFHaptic(for connection: DeviceConnectionPayload) {
+        guard connection.deviceConnected == true,
+              let status = connection.status,
+              status.source == "device" else {
+            deviceToFNearLatched = false
+            return
+        }
+        guard status.resolvedOperationEnabled == true else {
+            deviceToFNearLatched = false
+            return
+        }
+        guard phoneHapticsEnabled,
+              status.tofMode == "device",
+              status.tofOk == true,
+              let reportedAge = status.tofAgeMs,
+              let elapsed = deviceStatusElapsedMs,
+              reportedAge.isFinite,
+              reportedAge >= 0,
+              reportedAge + elapsed <= Self.deviceFrameFreshnessMs else {
+            return
+        }
+        let validRanges = (status.zones ?? []).compactMap { zone -> Double? in
+            guard zone.tofValid,
+                  let distance = zone.nearestCm,
+                  distance.isFinite,
+                  distance > 0 else { return nil }
+            return distance
+        }
+        guard let nearestCentimeters = validRanges.min() else { return }
+        if nearestCentimeters <= 80 {
+            guard !deviceToFNearLatched else { return }
+            deviceToFNearLatched = true
+            let generator = UINotificationFeedbackGenerator()
+            generator.prepare()
+            generator.notificationOccurred(.warning)
+        } else if nearestCentimeters >= 105 {
+            deviceToFNearLatched = false
         }
     }
 

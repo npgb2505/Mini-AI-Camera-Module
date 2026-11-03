@@ -328,6 +328,26 @@ app has no remote stop command and playback may finish. This is output only:
 the app does not request
 microphone access, and question input remains iOS keyboard Dictation.
 
+## Walking directions and iPhone haptics
+
+The native mode chooser now includes **Chỉ đường đi bộ**. It searches place
+names and addresses with MapKit, asks for foreground location only after the
+user chooses a destination, requests an Apple walking route, previews its line
+and first instruction, then hands turn-by-turn navigation to Apple Maps. This
+does not use Nominatim: Nominatim is a geocoder, while MapKit supplies both
+place search and walking directions. The route is a map recommendation and
+does not validate sidewalk access, stairs, construction, or whether a path is
+safe for a blind pedestrian.
+
+In **Chỉ dùng iPhone**, the **Rung cảnh báo trên iPhone** setting uses native
+UIKit haptics once when a fresh ARKit center-depth sample reaches 0.8 m or
+closer; it rearms after a fresh sample reaches 1.05 m. In ESP32 mode, the same
+setting can vibrate the iPhone once when a fresh, device-originated ToF zone
+reports 80 cm or closer while operation is enabled; it rearms at 105 cm. Stale,
+invalid, standby, BLE-only, or unconfirmed values do not trigger a haptic. The
+iPhone haptic supplements the existing speaker cue; it does not replace or
+control the ESP32 vibration motor.
+
 ## Backend connection
 
 Open settings and enter the Flask base URL, a Ro Sight account, and optional
