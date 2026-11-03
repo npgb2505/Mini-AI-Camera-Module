@@ -59,7 +59,12 @@ final class PhoneModeUITests: XCTestCase {
         mapsButton.tap()
         XCTAssertTrue(app.staticTexts["navigation.maps-handoff-state"].waitForExistence(timeout: 5))
 
-        app.buttons["Quay lại chọn chế độ"].tap()
+        let routeContent = app.scrollViews["navigation.route.content"]
+        XCTAssertTrue(routeContent.exists)
+        routeContent.swipeUp()
+        let backButton = app.buttons["Quay lại chọn chế độ"]
+        XCTAssertTrue(backButton.isHittable, "The back control should stay accessible while route details scroll.")
+        backButton.tap()
         XCTAssertTrue(directionsButton.waitForExistence(timeout: 5))
     }
 

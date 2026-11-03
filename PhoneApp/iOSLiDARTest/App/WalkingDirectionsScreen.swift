@@ -376,7 +376,10 @@ struct WalkingDirectionsScreen: View {
 #endif
 
                 if let route = model.route {
-                    routeDetails(route)
+                    ScrollView {
+                        routeDetails(route)
+                    }
+                    .accessibilityIdentifier("navigation.route.content")
                 } else {
                     placeResults
                 }
@@ -542,7 +545,6 @@ struct WalkingDirectionsScreen: View {
             .font(.system(size: 12, weight: .semibold, design: .rounded))
             .foregroundStyle(.cyan)
         }
-        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private static func durationLabel(_ seconds: TimeInterval) -> String {
