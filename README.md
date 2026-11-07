@@ -1,6 +1,6 @@
 # Ro Sight Cloudflare PWA
 
-This branch contains the current React PWA and Cloudflare Worker source for the Ro Sight assistive-vision prototype. It does not contain the separate native iOS LiDAR test app, PCB files, datasets, model weights, or provider credentials.
+This branch contains the current React PWA and Cloudflare Worker source for the Ro Sight assistive-vision prototype, plus the optional Flask proxy, YOLO host, VieNeu gateway, and their setup notes. It does not contain the separate native iOS LiDAR test app, PCB files, datasets, model weights, tunnel credentials, or provider secrets.
 
 ## Build locally
 
@@ -11,6 +11,8 @@ npm run build
 
 The build output is written to `dist/`, which is ignored by Git and is served by the Worker assets binding.
 
+The app imports `assistant_profile.json` at build time. Keep this file in the repository root when building; it contains model defaults and prompts, not API keys.
+
 ## Run the Worker locally
 
 1. Install Node.js and dependencies with `npm ci`.
@@ -20,6 +22,22 @@ The build output is written to `dist/`, which is ignored by Git and is served by
 ```powershell
 npm run cloud:dev
 ```
+
+## Optional local service hosts
+
+The Worker can proxy to configured model hosts. Source and setup notes are included for the laptop-side Flask bridge, YOLO service, and VieNeu gateway. Their model files and credentials are intentionally external. Follow `YOLO_HOST_SETUP.md` and `VIENEU_TTS_SETUP.md`, then enter only the public endpoint and server-side secret through the protected settings/configuration path.
+
+The Flask bridge also needs Python dependencies from `requirements.txt`; copy `.env.example` to `.env` and set only the values needed for the service being run. Do not expose `.env` or host tokens through the PWA.
+
+## Checks
+
+```powershell
+npm run test:app
+npm run test:worker
+npm run test:backend
+```
+
+These automated checks use fixtures/mocks for provider and device boundaries. They do not prove live camera inference, ESP32 pairing, production STT/TTS playback, or safe navigation.
 
 ## Deploy to a Cloudflare account
 

@@ -1,0 +1,6 @@
+Flask>=3.0,<4
+Pillow>=10.0,<13
+ultralytics>=8.4,<9
+openai>=1.100,<3
+python-dotenv>=1.0,<2
+websocket-client>=1.8,<2
