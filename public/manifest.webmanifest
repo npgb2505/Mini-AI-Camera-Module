@@ -1,0 +1,14 @@
+{
+  "name": "Rõ — Nhìn cùng bạn",
+  "short_name": "Rõ",
+  "description": "Ứng dụng quan sát bằng camera và giọng nói.",
+  "lang": "vi",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f5ed",
+  "theme_color": "#f7f5ed",
+  "icons": [
+    { "src": "/brand-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/brand-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

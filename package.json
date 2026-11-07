@@ -1,0 +1,29 @@
+{
+  "name": "ro-phone-companion",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "test:app": "node --test frontend/src/path-retry-backoff.test.js frontend/src/path-result-freshness.test.js frontend/src/guidance-alert-policy.test.js frontend/src/recording-session.test.js frontend/src/voice-turn-metrics.test.js frontend/src/voice-audio-resume.test.js frontend/src/voice-audio-keepalive.test.js frontend/src/realtime-speech-gate.test.js frontend/src/voice-speech-start.test.js frontend/src/voice-capability.test.js frontend/src/voice-output-route.test.js frontend/src/camera-lifecycle-announcement.test.js frontend/src/camera-stream-lifecycle.test.js frontend/src/device-session-lifecycle.test.js frontend/src/device-detection-freshness.test.js frontend/src/device-fusion-freshness.test.js frontend/src/device-button-action.test.js frontend/src/device-cloud-pairing.test.js",
+    "test:backend": "python -m unittest -v test_firmware_camera_frame_freshness test_path_inference_proxy test_voice_transcribe",
+    "test:worker": "node --test cloudflare/worker/device-telemetry.test.js cloudflare/worker/realtime-voice.test.js cloudflare/worker/model-settings.test.js cloudflare/worker/segmentation-host.test.js cloudflare/worker/device-cloud-events.test.js",
+    "preview": "vite preview --host 0.0.0.0",
+    "cloud:dev": "wrangler dev --config cloudflare/wrangler.jsonc",
+    "cloud:deploy": "npm run build && wrangler deploy --config cloudflare/wrangler.jsonc",
+    "cloud:db:create": "wrangler d1 create ro-mobile-assistant --config cloudflare/wrangler.jsonc --binding DB",
+    "cloud:db:migrate": "wrangler d1 migrations apply ro-mobile-assistant --remote --config cloudflare/wrangler.jsonc"
+  },
+  "dependencies": {
+    "@fontsource-variable/dm-sans": "^5.2.6",
+    "@phosphor-icons/react": "^2.1.10",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.4",
+    "vite": "^7.1.7",
+    "wrangler": "^4.152.0"
+  }
+}
